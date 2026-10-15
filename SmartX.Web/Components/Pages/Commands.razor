@@ -1,0 +1,686 @@
+﻿```razor
+@page "/commands"
+@using System.Linq
+@implements IDisposable
+@inject SmartX.Web.Services.CommandStateService CommandState
+@inject SmartX.Web.Services.RecommendationEngine RecommendationEngine
+
+<PageTitle>Command Stream | Smart-X</PageTitle>
+
+<div class="commands-page">
+    <header class="page-heading">
+        <div>
+            <span class="eyebrow">PART 2 / COMMAND MANAGEMENT</span>
+            <h1>Real-Time Command Stream</h1>
+            <p>Issue commands, review audit history, and monitor predictive recommendations.</p>
+        </div>
+        <span class="session-badge"><span class="status-dot"></span> Session Active</span>
+    </header>
+
+    <section class="stats-grid">
+        <article class="stat-card">
+            <span>Total Commands</span>
+            <strong>@CommandState.HistoryCount</strong>
+            <small>Recorded this session</small>
+        </article>
+        <article class="stat-card">
+            <span>Queued Commands</span>
+            <strong>@CommandState.QueueCount</strong>
+            <small>Awaiting processing</small>
+        </article>
+        <article class="stat-card">
+            <span>Active Errors</span>
+            <strong>@CommandState.ActiveErrors.Count</strong>
+            <small>Unique unresolved error keys</small>
+        </article>
+        <article class="stat-card">
+            <span>Audit Events</span>
+            <strong>@CommandState.AuditLog.Count</strong>
+            <small>Chronologically recorded</small>
+        </article>
+    </section>
+
+    <section class="panel recommendations-panel">
+        <div class="panel-heading">
+            <div>
+                <h2>Predictive Recommendations</h2>
+                <p>Insights derived from command activity and search terms.</p>
+            </div>
+            <span class="count-badge">@Recommendations.Count insights</span>
+        </div>
+
+        @if (Recommendations.Count == 0)
+        {
+            <div class="empty-state">
+                <strong>No recommendations currently available</strong>
+                <p>Recommendations appear when relevant activity or search terms are present.</p>
+            </div>
+        }
+        else
+        {
+            <div class="recommendation-list">
+                @foreach (var recommendation in Recommendations)
+                {
+                    <article class="recommendation-card"
+                             @key="RecommendationKey(recommendation)">
+                        <div class="recommendation-card-heading">
+                            <h3>@recommendation.Title</h3>
+                            <span class="severity @SeverityClass(recommendation.Severity)">
+                                @SeverityLabel(recommendation.Severity)
+                            </span>
+                        </div>
+                        <p>@recommendation.Description</p>
+                        @if (!string.IsNullOrWhiteSpace(recommendation.DeviceId))
+                        {
+                            <small>Device: @recommendation.DeviceId</small>
+                        }
+                    </article>
+                }
+            </div>
+        }
+
+        <div class="recommendation-search">
+            <label for="recommendationSearch">Search for guidance</label>
+            <div class="search-row">
+                <input id="recommendationSearch"
+                       @bind="_searchQuery"
+                       @bind:event="oninput"
+                       maxlength="120"
+                       placeholder="e.g. offline devices, battery, failed commands" />
+                <button type="button"
+                        class="secondary-button"
+                        @onclick="RefreshRecommendations">
+                    Analyse
+                </button>
+            </div>
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="panel-heading">
+            <div>
+                <h2>Issue Command</h2>
+                <p>Submit a command to the in-memory command queue.</p>
+            </div>
+            <span class="panel-tag">COMMAND CONSOLE</span>
+        </div>
+
+        <form class="command-form"
+              @onsubmit="SubmitCommandAsync"
+              @onsubmit:preventDefault>
+            <div class="form-grid">
+                <div class="form-field">
+                    <label for="deviceId">Device / Sensor ID</label>
+                    <input id="deviceId"
+                           @bind="_deviceId"
+                           maxlength="64"
+                           required
+                           placeholder="e.g. SENSOR-001" />
+                </div>
+
+                <div class="form-field">
+                    <label for="commandType">Command</label>
+                    <select id="commandType" @bind="_selectedCommand">
+                        <option value="RequestTelemetry">Request telemetry</option>
+                        <option value="RestartDevice">Restart device</option>
+                        <option value="SetSamplingInterval">Set sampling interval</option>
+                        <option value="RunDiagnostics">Run diagnostics</option>
+                        <option value="DisconnectDevice">Disconnect device</option>
+                    </select>
+                </div>
+
+                <div class="form-field">
+                    <label for="priority">Priority</label>
+                    <select id="priority" @bind="_selectedPriority">
+                        <option value="Normal">Normal</option>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-field parameter-field">
+                <label for="parameters">Parameters (optional)</label>
+                <input id="parameters"
+                       @bind="_parameters"
+                       maxlength="256"
+                       placeholder="e.g. interval=30" />
+            </div>
+
+            <div class="actions">
+                <button type="submit" class="primary-button">+ Queue Command</button>
+                <button type="button"
+                        class="secondary-button"
+                        @onclick="UndoLast"
+                        disabled="@(!CommandState.History.Any(x => x.Status == "Queued"))">
+                    Undo Last
+                </button>
+            </div>
+        </form>
+
+        @if (!string.IsNullOrWhiteSpace(_feedback))
+        {
+            <div class="feedback @(_isError ? "error" : "success")" role="status">
+                @_feedback
+            </div>
+        }
+    </section>
+
+    <section class="panel">
+        <div class="panel-heading">
+            <div>
+                <h2>Command Queue</h2>
+                <p>Choose FIFO processing or process the highest-priority pending command.</p>
+            </div>
+            <span class="count-badge">@CommandState.QueueCount queued</span>
+        </div>
+
+        @if (CommandState.Queue.Count == 0)
+        {
+            <div class="empty-state">
+                <strong>No commands queued</strong>
+                <p>Submitted commands will appear here.</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Device</th>
+                            <th>Command</th>
+                            <th>Priority</th>
+                            <th>Queued At</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in CommandState.Queue)
+                        {
+                            <tr @key="item.Id">
+                                <td class="device">@item.DeviceId</td>
+                                <td>@item.Command</td>
+                                <td>
+                                    <span class="priority @PriorityClass(item.Priority)">
+                                        @item.Priority
+                                    </span>
+                                </td>
+                                <td>@item.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="actions queue-actions">
+                <button type="button"
+                        class="secondary-button"
+                        @onclick="ProcessNext">
+                    Process Next (FIFO)
+                </button>
+                <button type="button"
+                        class="primary-button"
+                        @onclick="ProcessHighestPriority">
+                    Process Highest Priority
+                </button>
+                <button type="button"
+                        class="text-button"
+                        @onclick="ClearQueue">
+                    Clear Queue
+                </button>
+            </div>
+        }
+    </section>
+
+    <section class="panel">
+        <div class="panel-heading">
+            <div>
+                <h2>Active Error Registry</h2>
+                <p>Track unique unresolved error keys using a HashSet.</p>
+            </div>
+            <span class="count-badge">@CommandState.ActiveErrors.Count active</span>
+        </div>
+
+        <div class="error-entry">
+            <label for="errorKey">Error key</label>
+            <div class="search-row">
+                <input id="errorKey"
+                       @bind="_errorKey"
+                       @bind:event="oninput"
+                       maxlength="160"
+                       placeholder="e.g. SENSOR-001:OFFLINE" />
+                <button type="button"
+                        class="secondary-button"
+                        @onclick="RecordError">
+                    Record Error
+                </button>
+            </div>
+        </div>
+
+        @if (CommandState.ActiveErrors.Count == 0)
+        {
+            <div class="empty-state">
+                <strong>No active errors recorded</strong>
+                <p>Record an error key to track it until resolved.</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Error Key</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var error in CommandState.ActiveErrors.OrderBy(x => x))
+                        {
+                            <tr @key="error">
+                                <td class="device">@error</td>
+                                <td>
+                                    <button type="button"
+                                            class="secondary-button"
+                                            @onclick="() => ResolveError(error)">
+                                        Resolve
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <section class="panel">
+        <div class="panel-heading">
+            <div>
+                <h2>Command History</h2>
+                <p>Recorded submissions and local processing statuses.</p>
+            </div>
+            <span class="count-badge">@CommandState.HistoryCount records</span>
+        </div>
+
+        @if (CommandState.History.Count == 0)
+        {
+            <div class="empty-state">
+                <strong>No command history yet</strong>
+                <p>Your command records will appear here.</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Device</th>
+                            <th>Command</th>
+                            <th>Priority</th>
+                            <th>Status</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in CommandState.History)
+                        {
+                            <tr @key="item.Id">
+                                <td>@item.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                <td class="device">@item.DeviceId</td>
+                                <td>@item.Command</td>
+                                <td>
+                                    <span class="priority @PriorityClass(item.Priority)">
+                                        @item.Priority
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="history-status @StatusClass(item.Status)">
+                                        @item.Status
+                                    </span>
+                                </td>
+                                <td class="details">@item.Details</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <section class="panel">
+        <div class="panel-heading">
+            <div>
+                <h2>Chronological Audit Log</h2>
+                <p>Queue operations, processing, undo, clearing, and error changes.</p>
+            </div>
+            <span class="count-badge">@CommandState.AuditLog.Count events</span>
+        </div>
+
+        @if (CommandState.AuditLog.Count == 0)
+        {
+            <div class="empty-state">
+                <strong>No audit events yet</strong>
+                <p>Events will appear as commands and errors are managed.</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Action</th>
+                            <th>Device</th>
+                            <th>Command</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var entry in CommandState.AuditLog.Reverse())
+                        {
+                            <tr @key="entry">
+                                <td>@entry.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff")</td>
+                                <td>@entry.Action</td>
+                                <td class="device">@DisplayOrDash(entry.DeviceId)</td>
+                                <td>@DisplayOrDash(entry.Command)</td>
+                                <td class="details">@entry.Details</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <p class="disclaimer">
+        Commands are stored in the current Blazor circuit and are not sent to physical devices.
+        The audit log is in memory and is not persisted to a database. Telemetry-based recommendations
+        require actual telemetry observations.
+    </p>
+</div>
+
+<style>
+    .commands-page { max-width: 1440px; margin: 0 auto; color: #19243a; }
+    .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
+    .eyebrow { color: #3978ed; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; }
+    .page-heading h1 { margin: 9px 0 7px; font-size: clamp(25px, 3vw, 32px); font-weight: 800; }
+    .page-heading p, .panel-heading p { margin: 0; color: #718096; font-size: 13px; line-height: 1.6; }
+    .session-badge { display: inline-flex; align-items: center; gap: 8px; padding: 8px 11px; border: 1px solid #dce4ef; border-radius: 7px; color: #53647e; background: white; font-size: 11px; white-space: nowrap; }
+    .status-dot { width: 7px; height: 7px; display: inline-block; border-radius: 50%; background: #20a875; }
+    .stats-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 15px; margin-bottom: 20px; }
+    .stat-card, .panel { min-width: 0; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; box-shadow: 0 2px 7px rgb(16 28 53 / 3%); }
+    .stat-card { padding: 19px 20px; display: flex; flex-direction: column; gap: 9px; }
+    .stat-card > span, .stat-card small { color: #718096; font-size: 12px; }
+    .stat-card strong { overflow: hidden; font-size: 28px; font-weight: 800; text-overflow: ellipsis; }
+    .stat-card small { color: #8b98aa; font-size: 11px; }
+    .panel { margin-bottom: 20px; overflow: hidden; }
+    .panel-heading { padding: 19px 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #edf0f5; }
+    .panel-heading h2 { margin: 0 0 5px; font-size: 16px; font-weight: 800; }
+    .panel-tag, .count-badge { padding: 6px 9px; border-radius: 5px; color: #536b91; background: #f0f4fa; font-size: 10px; font-weight: 750; white-space: nowrap; }
+    .command-form { padding: 22px; }
+    .form-grid { display: grid; grid-template-columns: 1.2fr 1.2fr .7fr; gap: 16px; }
+    .form-field, .error-entry { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+    .form-field label, .recommendation-search label, .error-entry label { color: #46556d; font-size: 12px; font-weight: 700; }
+    .form-field input, .form-field select, .recommendation-search input, .error-entry input { width: 100%; min-height: 42px; padding: 10px 12px; border: 1px solid #dce3ed; border-radius: 6px; outline: none; color: #19243a; background: white; font: inherit; font-size: 12px; }
+    .form-field input:focus, .form-field select:focus, .recommendation-search input:focus, .error-entry input:focus { border-color: #3978ed; box-shadow: 0 0 0 3px rgb(57 120 237 / 12%); }
+    .parameter-field { margin-top: 17px; }
+    .actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+    .primary-button, .secondary-button, .text-button { min-height: 39px; padding: 10px 14px; border-radius: 6px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+    .primary-button { border: 1px solid #3978ed; color: white; background: #3978ed; }
+    .primary-button:hover { background: #2864d2; }
+    .secondary-button { border: 1px solid #dce3ed; color: #35445d; background: white; }
+    .secondary-button:hover:not(:disabled) { border-color: #a8c4ff; background: #f7f9ff; }
+    .secondary-button:disabled { cursor: not-allowed; opacity: .5; }
+    .text-button { border: 1px solid transparent; color: #6b778a; background: transparent; }
+    .feedback { margin: 0 22px 20px; padding: 11px 13px; border-radius: 6px; font-size: 12px; }
+    .feedback.success { color: #176b4a; background: #e9f8f0; border: 1px solid #c5ead7; }
+    .feedback.error { color: #a12622; background: #fff0ef; border: 1px solid #f3d0cd; }
+    .empty-state { padding: 36px 18px; text-align: center; }
+    .empty-state strong { font-size: 13px; }
+    .empty-state p { margin: 7px 0 0; color: #8290a4; font-size: 12px; }
+    .table-wrap { width: 100%; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: left; white-space: nowrap; }
+    thead { background: #f8fafd; }
+    th { padding: 12px 17px; color: #718096; font-size: 10px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; }
+    td { padding: 14px 17px; border-top: 1px solid #edf0f5; color: #4c5b70; font-size: 12px; }
+    tbody tr:hover { background: #fafcff; }
+    .device { color: #243956; font-weight: 750; }
+    .priority, .history-status { display: inline-block; padding: 5px 7px; border-radius: 4px; font-size: 10px; font-weight: 750; }
+    .priority-normal { color: #53647e; background: #edf1f6; }
+    .priority-high { color: #9a5b00; background: #fff2d9; }
+    .priority-critical { color: #b42318; background: #ffebe9; }
+    .status-queued { color: #245fc1; background: #eaf1ff; }
+    .status-processed { color: #176b4a; background: #e5f7ed; }
+    .status-undone, .status-cleared { color: #6b5b91; background: #f0eafd; }
+    .details { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+    .queue-actions { padding: 0 17px 17px; }
+    .recommendation-list { display: grid; gap: 12px; padding: 18px 22px 0; }
+    .recommendation-card { padding: 15px; border: 1px solid #e2e8f0; border-radius: 8px; }
+    .recommendation-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .recommendation-card h3 { margin: 0; font-size: 13px; font-weight: 800; }
+    .recommendation-card p { margin: 9px 0; color: #65748a; font-size: 12px; line-height: 1.6; }
+    .recommendation-card small { color: #718096; font-size: 11px; }
+    .severity { padding: 5px 7px; border-radius: 4px; font-size: 9px; font-weight: 800; white-space: nowrap; }
+    .severity-critical { color: #b42318; background: #fee4e2; }
+    .severity-warning { color: #92400e; background: #fef0c7; }
+    .severity-info { color: #245fc1; background: #eaf1ff; }
+    .recommendation-search, .error-entry { display: grid; gap: 9px; padding: 20px 22px; }
+    .search-row { display: flex; gap: 10px; }
+    .search-row input { flex: 1; min-width: 0; }
+    .disclaimer { margin: 0 0 8px; color: #7c899b; font-size: 11px; line-height: 1.6; }
+
+    @@media (max-width: 1000px) {
+        .stats-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    }
+    @@media (max-width: 850px) {
+        .form-grid { grid-template-columns: 1fr 1fr; }
+        .form-grid .form-field:last-child { grid-column: 1 / -1; }
+    }
+    @@media (max-width: 600px) {
+        .page-heading { flex-direction: column; }
+        .stats-grid, .form-grid { grid-template-columns: 1fr; }
+        .stat-card { padding: 15px; }
+        .panel-heading { padding: 16px; }
+        .command-form { padding: 16px; }
+        .form-grid .form-field:last-child { grid-column: auto; }
+        .panel-tag { display: none; }
+        .recommendation-list { padding-right: 16px; padding-left: 16px; }
+        .recommendation-search, .error-entry { padding: 16px; }
+        .recommendation-card-heading { align-items: flex-start; }
+        .search-row { flex-direction: column; }
+    }
+</style>
+
+@code {
+    private string _deviceId = string.Empty;
+    private string _selectedCommand = "RequestTelemetry";
+    private string _selectedPriority = "Normal";
+    private string _parameters = string.Empty;
+    private string _feedback = string.Empty;
+    private string _searchQuery = string.Empty;
+    private string _analysisQuery = string.Empty;
+    private string _errorKey = string.Empty;
+    private bool _isError;
+
+    private IReadOnlyList<SmartX.Web.Services.SmartXRecommendation> Recommendations =>
+        RecommendationEngine.Generate(searchQuery: _analysisQuery);
+
+    protected override void OnInitialized()
+    {
+        CommandState.StateChanged += OnStateChanged;
+    }
+
+    private Task SubmitCommandAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_deviceId))
+        {
+            SetFeedback("Enter a device or sensor ID.", true);
+            return Task.CompletedTask;
+        }
+
+        try
+        {
+            CommandState.Enqueue(
+                _deviceId,
+                _selectedCommand,
+                _selectedPriority,
+                _parameters);
+
+            SetFeedback($"Command queued for {_deviceId.Trim()}.", false);
+            _deviceId = string.Empty;
+            _parameters = string.Empty;
+        }
+        catch (ArgumentException ex)
+        {
+            SetFeedback(ex.Message, true);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void RefreshRecommendations()
+    {
+        _analysisQuery = _searchQuery.Trim();
+    }
+
+    private void ProcessNext()
+    {
+        var record = CommandState.ProcessNext();
+
+        SetFeedback(
+            record is null
+                ? "There are no commands to process."
+                : $"Processed command for {record.DeviceId} locally using FIFO order.",
+            record is null);
+    }
+
+    private void ProcessHighestPriority()
+    {
+        var record = CommandState.ProcessHighestPriority();
+
+        SetFeedback(
+            record is null
+                ? "There are no pending commands to process."
+                : $"Processed {record.Priority}-priority command '{record.Command}' for {record.DeviceId} locally.",
+            record is null);
+    }
+
+    private void UndoLast()
+    {
+        var record = CommandState.UndoLast();
+
+        SetFeedback(
+            record is null
+                ? "No queued command is available to undo."
+                : $"Undo recorded for {record.DeviceId}.",
+            record is null);
+    }
+
+    private void ClearQueue()
+    {
+        var count = CommandState.ClearQueue();
+
+        SetFeedback(
+            count == 0
+                ? "The queue is already empty."
+                : $"Cleared {count} pending command(s). History was retained.",
+            count == 0);
+    }
+
+    private void RecordError()
+    {
+        if (string.IsNullOrWhiteSpace(_errorKey))
+        {
+            SetFeedback("Enter an error key to record.", true);
+            return;
+        }
+
+        var key = _errorKey.Trim();
+        var alreadyExists = CommandState.ActiveErrors.Contains(key);
+
+        CommandState.RecordActiveError(key);
+
+        SetFeedback(
+            alreadyExists
+                ? $"Error '{key}' is already active."
+                : $"Recorded active error '{key}'.",
+            alreadyExists);
+
+        _errorKey = string.Empty;
+    }
+
+    private void ResolveError(string errorKey)
+    {
+        var resolved = CommandState.ResolveActiveError(errorKey);
+
+        SetFeedback(
+            resolved
+                ? $"Resolved error '{errorKey}'."
+                : $"Error '{errorKey}' was not active.",
+            !resolved);
+    }
+
+    private void SetFeedback(string message, bool isError)
+    {
+        _feedback = message;
+        _isError = isError;
+    }
+
+    private void OnStateChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private static string DisplayOrDash(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "—" : value;
+
+    private static string RecommendationKey(
+        SmartX.Web.Services.SmartXRecommendation recommendation) =>
+        $"{recommendation.Title}|{recommendation.DeviceId}";
+
+    private static string SeverityLabel(
+        SmartX.Web.Services.RecommendationSeverity severity) =>
+        severity switch
+        {
+            SmartX.Web.Services.RecommendationSeverity.Critical => "CRITICAL",
+            SmartX.Web.Services.RecommendationSeverity.Warning => "WARNING",
+            _ => "INFO"
+        };
+
+    private static string SeverityClass(
+        SmartX.Web.Services.RecommendationSeverity severity) =>
+        severity switch
+        {
+            SmartX.Web.Services.RecommendationSeverity.Critical => "severity-critical",
+            SmartX.Web.Services.RecommendationSeverity.Warning => "severity-warning",
+            _ => "severity-info"
+        };
+
+    private static string PriorityClass(string priority) =>
+        priority.ToLowerInvariant() switch
+        {
+            "critical" => "priority-critical",
+            "high" => "priority-high",
+            _ => "priority-normal"
+        };
+
+    private static string StatusClass(string status) =>
+        status.ToLowerInvariant() switch
+        {
+            "queued" => "status-queued",
+            "processed locally" => "status-processed",
+            "undone" => "status-undone",
+            "cleared" => "status-cleared",
+            _ => "status-queued"
+        };
+
+    public void Dispose()
+    {
+        CommandState.StateChanged -= OnStateChanged;
+    }
+}
+```

@@ -1,18 +1,16 @@
 ﻿@page "/"
-@rendermode InteractiveServer
 
 @using System.Net.Http.Json
 @using SmartX.Shared.Models
+@using Microsoft.AspNetCore.Components.Routing
 
 @inject IHttpClientFactory HttpClientFactory
 @implements IDisposable
 
 <div class="sx-page">
 
-    <!-- HERO -->
     <section class="sx-hero">
         <div class="sx-hero-content">
-
             <div class="sx-eyebrow">
                 <span class="sx-eyebrow-dot"></span>
                 SMART-X / EDGE OPERATIONS
@@ -36,12 +34,8 @@
                 </div>
 
                 <span class="sx-divider"></span>
-
-                <span class="sx-meta-text">
-                    Edge Gateway Interface
-                </span>
+                <span class="sx-meta-text">Edge Gateway Interface</span>
             </div>
-
         </div>
 
         <div class="sx-hero-visual" aria-hidden="true">
@@ -56,10 +50,7 @@
         </div>
     </section>
 
-
-    <!-- GATEWAY CONTROL -->
     <section class="sx-control-panel">
-
         <div class="sx-section-heading">
             <div>
                 <span class="sx-section-kicker">01 / SYSTEM STATUS</span>
@@ -73,15 +64,8 @@
             <button class="sx-button sx-button-primary"
                     @onclick="CheckGatewayAsync"
                     disabled="@IsChecking">
-
-                <span class="sx-button-icon">
-                    ↻
-                </span>
-
-                @(IsChecking
-                    ? "Checking Gateway..."
-                    : "Refresh Gateway")
-
+                <span class="sx-button-icon">↻</span>
+                @(IsChecking ? "Checking Gateway..." : "Refresh Gateway")
             </button>
         </div>
 
@@ -90,22 +74,13 @@
             <div class="sx-feedback @(GatewayOnline ? "success" : "error")"
                  role="status"
                  aria-live="polite">
-
-                <span class="sx-feedback-icon">
-                    @(GatewayOnline ? "✓" : "!")
-                </span>
-
+                <span class="sx-feedback-icon">@(GatewayOnline ? "✓" : "!")</span>
                 <span>@ConnectionMessage</span>
-
             </div>
         }
-
     </section>
 
-
-    <!-- ENGAGEMENT CENTRE -->
     <section class="sx-section">
-
         <div class="sx-section-heading">
             <div>
                 <span class="sx-section-kicker">02 / INTELLIGENT MONITORING</span>
@@ -135,16 +110,13 @@
         else if (EngagementSnapshot is not null)
         {
             <div class="sx-attention-card">
-
                 <div>
                     <span class="sx-card-kicker">CURRENT ATTENTION LEVEL</span>
-
                     <strong class="sx-attention-value">
                         @EngagementSnapshot.AttentionLevel
                     </strong>
-
                     <span class="sx-card-subtext">
-                        Engagement snapshot generated
+                        Snapshot generated
                         @EngagementSnapshot.GeneratedAtUtc.ToLocalTime()
                     </span>
                 </div>
@@ -152,13 +124,9 @@
                 <div class="sx-attention-indicator">
                     <span></span>
                 </div>
-
             </div>
 
-
-            <!-- KPI GRID -->
             <div class="sx-kpi-grid">
-
                 <article class="sx-kpi-card">
                     <span class="sx-kpi-label">TOTAL ISSUES</span>
                     <strong>@EngagementSnapshot.TotalIssues</strong>
@@ -194,101 +162,72 @@
                     <strong>@EngagementSnapshot.ResolvedIssues</strong>
                     <span class="sx-kpi-description">Successfully closed incidents</span>
                 </article>
-
             </div>
 
-
-            <!-- ATTENTION SIGNAL -->
             @if (EngagementSnapshot.CriticalOpenIssues > 0)
             {
                 <div class="sx-alert sx-alert-critical">
-
                     <div class="sx-alert-icon">!</div>
-
                     <div>
                         <strong>Immediate attention required</strong>
-
                         <p>
-                            @EngagementSnapshot.CriticalOpenIssues
-                            critical
+                            @EngagementSnapshot.CriticalOpenIssues critical
                             @(EngagementSnapshot.CriticalOpenIssues == 1
                                 ? "incident requires"
                                 : "incidents require")
                             immediate attention.
                         </p>
                     </div>
-
                 </div>
             }
             else if (EngagementSnapshot.WarningOpenIssues > 0)
             {
                 <div class="sx-alert sx-alert-warning">
-
                     <div class="sx-alert-icon">!</div>
-
                     <div>
                         <strong>Attention required</strong>
-
                         <p>
-                            @EngagementSnapshot.WarningOpenIssues
-                            warning
+                            @EngagementSnapshot.WarningOpenIssues warning
                             @(EngagementSnapshot.WarningOpenIssues == 1
                                 ? "incident remains"
                                 : "incidents remain")
                             under observation.
                         </p>
                     </div>
-
                 </div>
             }
             else if (EngagementSnapshot.OpenIssues > 0)
             {
                 <div class="sx-alert sx-alert-info">
-
                     <div class="sx-alert-icon">i</div>
-
                     <div>
                         <strong>Monitoring active</strong>
-
                         <p>
-                            @EngagementSnapshot.OpenIssues
-                            open
+                            @EngagementSnapshot.OpenIssues open
                             @(EngagementSnapshot.OpenIssues == 1
                                 ? "incident is"
                                 : "incidents are")
                             currently being monitored.
                         </p>
                     </div>
-
                 </div>
             }
             else
             {
                 <div class="sx-alert sx-alert-success">
-
                     <div class="sx-alert-icon">✓</div>
-
                     <div>
                         <strong>All systems clear</strong>
-
-                        <p>
-                            No active incidents currently require attention.
-                        </p>
+                        <p>No active incidents currently require attention.</p>
                     </div>
-
                 </div>
             }
-
         }
-
     </section>
 
-
-    <!-- PRIORITY QUEUE -->
     @if (EngagementSnapshot is not null)
     {
         <section class="sx-section">
-
             <div class="sx-section-heading">
                 <div>
                     <span class="sx-section-kicker">03 / PRIORITY ENGINE</span>
@@ -311,23 +250,17 @@
             else
             {
                 <div class="sx-issue-grid">
-
                     @foreach (var issue in EngagementSnapshot.PriorityIssues)
                     {
-                        <article class="sx-issue-card">
-
+                        <article class="sx-issue-card" @key="issue.Id">
                             <div class="sx-issue-top">
                                 <span class="sx-severity sx-severity-@issue.Severity.ToLowerInvariant()">
                                     @issue.Severity
                                 </span>
-
-                                <span class="sx-issue-status">
-                                    @issue.Status
-                                </span>
+                                <span class="sx-issue-status">@issue.Status</span>
                             </div>
 
                             <h3>@issue.Title</h3>
-
                             <p>@issue.Description</p>
 
                             <div class="sx-issue-meta">
@@ -335,34 +268,22 @@
                                 <strong>@issue.ReportedAtUtc.ToLocalTime()</strong>
                             </div>
 
-                            @if (issue.Status.Equals(
-                                "Open",
-                                StringComparison.OrdinalIgnoreCase))
+                            @if (IsOpen(issue.Status))
                             {
                                 <button class="sx-button sx-button-danger"
                                         @onclick="() => ResolveIssueAsync(issue.Id)"
                                         disabled="@IsResolvingIssue">
-
-                                    @(IsResolvingIssue
-                                        ? "Resolving..."
-                                        : "Resolve Incident")
-
+                                    @(IsResolvingIssue ? "Resolving..." : "Resolve Incident")
                                 </button>
                             }
-
                         </article>
                     }
-
                 </div>
             }
-
         </section>
     }
 
-
-    <!-- TRIAGE -->
     <section class="sx-section">
-
         <div class="sx-section-heading">
             <div>
                 <span class="sx-section-kicker">04 / INVESTIGATION</span>
@@ -375,10 +296,8 @@
         </div>
 
         <div class="sx-filter-panel">
-
             <div class="sx-field">
                 <label for="issueSearch">Search incidents</label>
-
                 <input id="issueSearch"
                        class="sx-input"
                        @bind="SearchText"
@@ -388,76 +307,54 @@
 
             <div class="sx-field">
                 <label for="severityFilter">Severity</label>
-
-                <select id="severityFilter"
-                        class="sx-input"
-                        @bind="SelectedSeverity">
-
+                <select id="severityFilter" class="sx-input" @bind="SelectedSeverity">
                     <option value="All">All severities</option>
                     <option value="Critical">Critical</option>
                     <option value="Warning">Warning</option>
                     <option value="Info">Info</option>
-
                 </select>
             </div>
 
             <div class="sx-field">
                 <label for="statusFilter">Status</label>
-
-                <select id="statusFilter"
-                        class="sx-input"
-                        @bind="SelectedStatus">
-
+                <select id="statusFilter" class="sx-input" @bind="SelectedStatus">
                     <option value="All">All statuses</option>
                     <option value="Open">Open</option>
                     <option value="Resolved">Resolved</option>
-
                 </select>
             </div>
 
             <div class="sx-field">
                 <label for="sortOrder">Sort by</label>
-
-                <select id="sortOrder"
-                        class="sx-input"
-                        @bind="SelectedSort">
-
+                <select id="sortOrder" class="sx-input" @bind="SelectedSort">
                     <option value="Priority">Highest priority</option>
                     <option value="Newest">Newest first</option>
                     <option value="Oldest">Oldest first</option>
-
                 </select>
             </div>
-
         </div>
 
         <div class="sx-results-summary">
             <span class="sx-results-count">@FilteredIssues.Count()</span>
             <span>of @Issues.Count incidents displayed</span>
         </div>
-
     </section>
 
-
-    <!-- REPORT ISSUE -->
     <section class="sx-section">
-
         <div class="sx-section-heading">
             <div>
                 <span class="sx-section-kicker">05 / OPERATOR INPUT</span>
                 <h2>Report an Issue</h2>
                 <p>
-                    Create an operational incident and immediately feed it
-                    into the Smart-X engagement prioritisation engine.
+                    Create an operational incident and feed it into the
+                    Smart-X engagement prioritisation engine.
                 </p>
             </div>
         </div>
 
         <div class="sx-form-panel">
-
             <div class="sx-field sx-field-wide">
                 <label for="issueTitle">Issue title</label>
-
                 <input id="issueTitle"
                        class="sx-input"
                        @bind="NewIssueTitle"
@@ -466,7 +363,6 @@
 
             <div class="sx-field sx-field-wide">
                 <label for="issueDescription">Description</label>
-
                 <textarea id="issueDescription"
                           class="sx-input sx-textarea"
                           @bind="NewIssueDescription"
@@ -475,15 +371,10 @@
 
             <div class="sx-field">
                 <label for="issueSeverity">Severity</label>
-
-                <select id="issueSeverity"
-                        class="sx-input"
-                        @bind="NewIssueSeverity">
-
+                <select id="issueSeverity" class="sx-input" @bind="NewIssueSeverity">
                     <option value="Info">Information</option>
                     <option value="Warning">Warning</option>
                     <option value="Critical">Critical</option>
-
                 </select>
             </div>
 
@@ -491,29 +382,18 @@
                 <button class="sx-button sx-button-primary"
                         @onclick="ReportIssueAsync"
                         disabled="@IsReportingIssue">
-
-                    @(IsReportingIssue
-                        ? "Reporting..."
-                        : "Report Incident")
-
+                    @(IsReportingIssue ? "Reporting..." : "Report Incident")
                 </button>
             </div>
-
         </div>
-
     </section>
 
-
-    <!-- LIVE BOARD -->
     <section class="sx-section">
-
         <div class="sx-section-heading">
             <div>
                 <span class="sx-section-kicker">06 / LIVE OPERATIONS</span>
                 <h2>Live Incident Board</h2>
-                <p>
-                    Current incident activity across the Smart-X environment.
-                </p>
+                <p>Current incident activity across the Smart-X environment.</p>
             </div>
 
             <div class="sx-live-label">
@@ -543,23 +423,17 @@
         else
         {
             <div class="sx-issue-grid">
-
                 @foreach (var issue in FilteredIssues)
                 {
-                    <article class="sx-issue-card">
-
+                    <article class="sx-issue-card" @key="issue.Id">
                         <div class="sx-issue-top">
                             <span class="sx-severity sx-severity-@issue.Severity.ToLowerInvariant()">
                                 @issue.Severity
                             </span>
-
-                            <span class="sx-issue-status">
-                                @issue.Status
-                            </span>
+                            <span class="sx-issue-status">@issue.Status</span>
                         </div>
 
                         <h3>@issue.Title</h3>
-
                         <p>@issue.Description</p>
 
                         <div class="sx-issue-meta">
@@ -567,49 +441,32 @@
                             <strong>@issue.ReportedAtUtc.ToLocalTime()</strong>
                         </div>
 
-                        @if (issue.Status.Equals(
-                            "Open",
-                            StringComparison.OrdinalIgnoreCase))
+                        @if (IsOpen(issue.Status))
                         {
                             <button class="sx-button sx-button-danger"
                                     @onclick="() => ResolveIssueAsync(issue.Id)"
                                     disabled="@IsResolvingIssue">
-
-                                @(IsResolvingIssue
-                                    ? "Resolving..."
-                                    : "Resolve Incident")
-
+                                @(IsResolvingIssue ? "Resolving..." : "Resolve Incident")
                             </button>
                         }
                         else
                         {
-                            <span class="sx-resolved-badge">
-                                ✓ Resolved
-                            </span>
+                            <span class="sx-resolved-badge">✓ Resolved</span>
                         }
-
                     </article>
                 }
-
             </div>
         }
-
     </section>
 
-
-    <!-- RECENT ACTIVITY -->
     @if (EngagementSnapshot is not null)
     {
         <section class="sx-section">
-
             <div class="sx-section-heading">
                 <div>
                     <span class="sx-section-kicker">07 / AUDIT ACTIVITY</span>
                     <h2>Recent Engagement Activity</h2>
-                    <p>
-                        Recent system events provide operational context
-                        for changing gateway conditions.
-                    </p>
+                    <p>Recent events provide operational context for changing gateway conditions.</p>
                 </div>
             </div>
 
@@ -623,18 +480,14 @@
             else
             {
                 <div class="sx-timeline">
-
                     @foreach (var issue in EngagementSnapshot.RecentActivity)
                     {
-                        <article class="sx-timeline-item">
-
+                        <article class="sx-timeline-item" @key="issue.Id">
                             <div class="sx-timeline-marker"></div>
 
                             <div class="sx-timeline-content">
-
                                 <div class="sx-timeline-heading">
                                     <h3>@issue.Title</h3>
-
                                     <span class="sx-severity sx-severity-@issue.Severity.ToLowerInvariant()">
                                         @issue.Severity
                                     </span>
@@ -645,39 +498,27 @@
                                     <span>•</span>
                                     <span>@issue.ReportedAtUtc.ToLocalTime()</span>
                                 </div>
-
                             </div>
-
                         </article>
                     }
-
                 </div>
             }
-
         </section>
     }
 
-
-    <!-- FEEDBACK -->
     @if (!string.IsNullOrWhiteSpace(DashboardMessage))
     {
         <div class="sx-feedback @(DashboardMessageCssClass == "connection-success" ? "success" : "error")"
              role="status"
              aria-live="polite">
-
             <span class="sx-feedback-icon">
                 @(DashboardMessageCssClass == "connection-success" ? "✓" : "!")
             </span>
-
             <span>@DashboardMessage</span>
-
         </div>
     }
 
-
-    <!-- ARCHITECTURE PILLARS -->
     <section class="sx-section sx-architecture-section">
-
         <div class="sx-section-heading">
             <div>
                 <span class="sx-section-kicker">SMART-X / ARCHITECTURE</span>
@@ -690,320 +531,192 @@
         </div>
 
         <div class="sx-architecture-grid">
-
             <article class="sx-feature-card sx-feature-active">
-
                 <div class="sx-feature-number">01</div>
-
                 <div class="sx-feature-icon">SD</div>
-
                 <span class="sx-feature-status">ACTIVE</span>
-
                 <h3>Sensor Data Ingestion</h3>
-
                 <p>
                     Register distributed sensors, submit telemetry,
                     validate incoming values, and monitor gateway activity.
                 </p>
-
-                <a href="/sensors"
-                       class="sx-feature-link">
-                    Open Sensor Management →
-                </a>
-
+                <NavLink href="/"
+                         Match="NavLinkMatch.All"
+                         class="sx-feature-link">
+                    Open Sensor Dashboard →
+                </NavLink>
             </article>
 
-
             <article class="sx-feature-card">
-
                 <div class="sx-feature-number">02</div>
-
                 <div class="sx-feature-icon">CS</div>
-
-                <span class="sx-feature-status disabled">PART 2</span>
-
+                <span class="sx-feature-status">ACTIVE</span>
                 <h3>Command Stream &amp; History</h3>
-
                 <p>
-                    Real-time command execution and historical command
-                    management will extend the gateway in the next stage.
+                    Manage real-time commands, FIFO processing, priority
+                    execution, undo operations, and command audit history.
                 </p>
-
-                <span class="sx-feature-disabled">
-                    Coming Later
-                </span>
-
+                <NavLink href="/commands"
+                         Match="NavLinkMatch.Prefix"
+                         class="sx-feature-link">
+                    Open Command Centre →
+                </NavLink>
             </article>
 
-
-            <article class="sx-feature-card">
-
+            <article class="sx-feature-card sx-feature-disabled-card">
                 <div class="sx-feature-number">03</div>
-
                 <div class="sx-feature-icon">NT</div>
-
                 <span class="sx-feature-status disabled">FINAL PoE</span>
-
                 <h3>Network Topology &amp; Mesh Routing</h3>
-
                 <p>
                     Mesh topology visualisation and intelligent routing
                     capabilities will complete the Smart-X ecosystem.
                 </p>
-
-                <span class="sx-feature-disabled">
-                    Coming Later
-                </span>
-
+                <span class="sx-feature-disabled">Coming Later</span>
             </article>
-
         </div>
-
     </section>
-
 </div>
 
-
 @code {
-
     private bool IsChecking;
-
     private bool GatewayOnline;
-
-    private string GatewayStatus =
-        "Gateway Status Unknown";
-
+    private string GatewayStatus = "Gateway Status Unknown";
     private string? ConnectionMessage;
 
-    private string ConnectionCssClass =
-        string.Empty;
-
     private DashboardEngagementSnapshot? EngagementSnapshot;
-
-    private List<UserIssue> Issues =
-        new();
+    private List<UserIssue> Issues = new();
 
     private bool IsLoadingEngagement;
-
     private bool IsLoadingIssues;
-
     private bool IsReportingIssue;
-
     private bool IsResolvingIssue;
 
     private string? DashboardMessage;
+    private string DashboardMessageCssClass = string.Empty;
 
-    private string DashboardMessageCssClass =
-        string.Empty;
+    private string SearchText = string.Empty;
+    private string SelectedSeverity = "All";
+    private string SelectedStatus = "All";
+    private string SelectedSort = "Priority";
 
-    private string SearchText =
-        string.Empty;
-
-    private string SelectedSeverity =
-        "All";
-
-    private string SelectedStatus =
-        "All";
-
-    private string SelectedSort =
-        "Priority";
-
-    private string NewIssueTitle =
-        string.Empty;
-
-    private string NewIssueDescription =
-        string.Empty;
-
-    private string NewIssueSeverity =
-        "Info";
+    private string NewIssueTitle = string.Empty;
+    private string NewIssueDescription = string.Empty;
+    private string NewIssueSeverity = "Info";
 
     private PeriodicTimer? _refreshTimer;
-
-    private CancellationTokenSource?
-        _refreshCancellation;
+    private CancellationTokenSource? _refreshCancellation;
+    private Task? _refreshTask;
+    private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
     private IEnumerable<UserIssue> FilteredIssues
     {
         get
         {
-            IEnumerable<UserIssue> result =
-                Issues;
+            IEnumerable<UserIssue> result = Issues;
 
             if (!string.IsNullOrWhiteSpace(SearchText))
             {
-                var search =
-                    SearchText.Trim();
+                var search = SearchText.Trim();
 
-                result =
-                    result.Where(x =>
-                        x.Title.Contains(
-                            search,
-                            StringComparison.OrdinalIgnoreCase) ||
-                        x.Description.Contains(
-                            search,
-                            StringComparison.OrdinalIgnoreCase));
+                result = result.Where(issue =>
+                    (issue.Title?.Contains(
+                        search,
+                        StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (issue.Description?.Contains(
+                        search,
+                        StringComparison.OrdinalIgnoreCase) ?? false));
             }
 
-            if (!SelectedSeverity.Equals(
-                    "All",
-                    StringComparison.OrdinalIgnoreCase))
+            if (!SelectedSeverity.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
-                result =
-                    result.Where(x =>
-                        x.Severity.Equals(
-                            SelectedSeverity,
-                            StringComparison.OrdinalIgnoreCase));
+                result = result.Where(issue =>
+                    issue.Severity.Equals(
+                        SelectedSeverity,
+                        StringComparison.OrdinalIgnoreCase));
             }
 
-            if (!SelectedStatus.Equals(
-                    "All",
-                    StringComparison.OrdinalIgnoreCase))
+            if (!SelectedStatus.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
-                result =
-                    result.Where(x =>
-                        x.Status.Equals(
-                            SelectedStatus,
-                            StringComparison.OrdinalIgnoreCase));
+                result = result.Where(issue =>
+                    issue.Status.Equals(
+                        SelectedStatus,
+                        StringComparison.OrdinalIgnoreCase));
             }
 
-            result =
-                SelectedSort switch
-                {
-                    "Newest" =>
-                        result.OrderByDescending(
-                            x => x.ReportedAtUtc),
-
-                    "Oldest" =>
-                        result.OrderBy(
-                            x => x.ReportedAtUtc),
-
-                    _ =>
-                        result
-                            .OrderByDescending(
-                                x => GetSeverityPriority(
-                                    x.Severity))
-                            .ThenByDescending(
-                                x => x.Status.Equals(
-                                    "Open",
-                                    StringComparison.OrdinalIgnoreCase))
-                            .ThenByDescending(
-                                x => x.ReportedAtUtc)
-                };
-
-            return result;
+            return SelectedSort switch
+            {
+                "Newest" => result.OrderByDescending(issue => issue.ReportedAtUtc),
+                "Oldest" => result.OrderBy(issue => issue.ReportedAtUtc),
+                _ => result
+                    .OrderByDescending(issue => GetSeverityPriority(issue.Severity))
+                    .ThenByDescending(issue => IsOpen(issue.Status))
+                    .ThenByDescending(issue => issue.ReportedAtUtc)
+            };
         }
     }
 
-    private static int GetSeverityPriority(
-        string? severity)
+    protected override async Task OnInitializedAsync()
     {
-        return severity?.ToLowerInvariant() switch
+        await CheckGatewayAsync();
+        StartLiveRefresh();
+    }
+
+    private static bool IsOpen(string? status) =>
+        string.Equals(status, "Open", StringComparison.OrdinalIgnoreCase);
+
+    private static int GetSeverityPriority(string? severity) =>
+        severity?.ToLowerInvariant() switch
         {
             "critical" => 3,
             "warning" => 2,
             "info" => 1,
             _ => 0
         };
-    }
-
-    protected override async Task OnInitializedAsync()
-    {
-        await CheckGatewayAsync();
-
-        StartLiveRefresh();
-    }
 
     private async Task CheckGatewayAsync()
     {
         if (IsChecking)
-        {
             return;
-        }
 
         IsChecking = true;
-
         ConnectionMessage = null;
-        ConnectionCssClass = string.Empty;
         GatewayStatus = "Checking Gateway...";
 
         try
         {
-            var httpClient =
-                HttpClientFactory.CreateClient(
-                    "SmartXApi");
+            var client = HttpClientFactory.CreateClient("SmartXApi");
 
-            using var response =
-                await httpClient.GetAsync(
-                    "",
-                    HttpCompletionOption.ResponseHeadersRead);
+            using var response = await client.GetAsync(
+                "api/telemetry/health",
+                HttpCompletionOption.ResponseHeadersRead);
 
-            if (response.IsSuccessStatusCode)
+            GatewayOnline = response.IsSuccessStatusCode;
+
+            if (GatewayOnline)
             {
-                GatewayOnline = true;
-
-                GatewayStatus =
-                    "Gateway Online";
-
-                ConnectionMessage =
-                    "Successfully connected to the Smart-X API.";
-
-                ConnectionCssClass =
-                    "connection-success";
-
+                GatewayStatus = "Gateway Online";
+                ConnectionMessage = "Successfully connected to the Smart-X API.";
                 await LoadEngagementAsync();
             }
             else
             {
-                GatewayOnline = false;
-
-                GatewayStatus =
-                    "Gateway Error";
-
+                GatewayStatus = "Gateway Error";
                 ConnectionMessage =
                     $"The Smart-X API returned HTTP {(int)response.StatusCode}.";
-
-                ConnectionCssClass =
-                    "connection-error";
             }
         }
-        catch (TaskCanceledException)
+        catch (OperationCanceledException)
         {
             GatewayOnline = false;
-
-            GatewayStatus =
-                "Gateway Timeout";
-
-            ConnectionMessage =
-                "The Smart-X API did not respond within the configured timeout.";
-
-            ConnectionCssClass =
-                "connection-error";
+            GatewayStatus = "Gateway Timeout";
+            ConnectionMessage = "The Smart-X API request timed out.";
         }
         catch (HttpRequestException)
         {
             GatewayOnline = false;
-
-            GatewayStatus =
-                "Gateway Offline";
-
-            ConnectionMessage =
-                "Unable to connect to the Smart-X API.";
-
-            ConnectionCssClass =
-                "connection-error";
-        }
-        catch (Exception ex)
-        {
-            GatewayOnline = false;
-
-            GatewayStatus =
-                "Gateway Error";
-
-            ConnectionMessage =
-                $"Unexpected gateway error: {ex.Message}";
-
-            ConnectionCssClass =
-                "connection-error";
+            GatewayStatus = "Gateway Offline";
+            ConnectionMessage = "Unable to connect to the Smart-X API.";
         }
         finally
         {
@@ -1013,60 +726,48 @@
 
     private async Task LoadEngagementAsync()
     {
-        if (IsLoadingEngagement)
-        {
+        if (!await _refreshLock.WaitAsync(0))
             return;
-        }
 
         IsLoadingEngagement = true;
+        IsLoadingIssues = true;
 
         try
         {
-            var httpClient =
-                HttpClientFactory.CreateClient(
-                    "SmartXApi");
+            var client = HttpClientFactory.CreateClient("SmartXApi");
 
-            var snapshot =
-                await httpClient.GetFromJsonAsync<
-                    DashboardEngagementSnapshot>(
-                    "api/dashboard/engagement");
+            var snapshot = await client.GetFromJsonAsync<DashboardEngagementSnapshot>(
+                "api/dashboard/engagement");
 
             if (snapshot is not null)
             {
-                EngagementSnapshot =
-                    snapshot;
+                EngagementSnapshot = snapshot;
 
-                Issues =
-                    snapshot.RecentActivity
-                        .Concat(snapshot.PriorityIssues)
-                        .GroupBy(x => x.Id)
-                        .Select(x => x.First())
-                        .OrderByDescending(
-                            x => x.ReportedAtUtc)
-                        .ToList();
+                Issues = snapshot.RecentActivity
+                    .Concat(snapshot.PriorityIssues)
+                    .GroupBy(issue => issue.Id)
+                    .Select(group => group.First())
+                    .OrderByDescending(issue => issue.ReportedAtUtc)
+                    .ToList();
             }
 
             DashboardMessage = null;
         }
         catch (HttpRequestException)
         {
-            DashboardMessage =
-                "Unable to refresh dashboard engagement data.";
-
-            DashboardMessageCssClass =
-                "connection-error";
+            DashboardMessage = "Unable to refresh dashboard engagement data.";
+            DashboardMessageCssClass = "connection-error";
         }
-        catch (Exception ex)
+        catch (System.Text.Json.JsonException)
         {
-            DashboardMessage =
-                $"Dashboard engagement error: {ex.Message}";
-
-            DashboardMessageCssClass =
-                "connection-error";
+            DashboardMessage = "The engagement API returned invalid data.";
+            DashboardMessageCssClass = "connection-error";
         }
         finally
         {
             IsLoadingEngagement = false;
+            IsLoadingIssues = false;
+            _refreshLock.Release();
         }
     }
 
@@ -1076,24 +777,13 @@
 
         if (string.IsNullOrWhiteSpace(NewIssueTitle))
         {
-            DashboardMessage =
-                "Issue title is required.";
-
-            DashboardMessageCssClass =
-                "connection-error";
-
+            SetDashboardMessage("Issue title is required.", false);
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(
-            NewIssueDescription))
+        if (string.IsNullOrWhiteSpace(NewIssueDescription))
         {
-            DashboardMessage =
-                "Issue description is required.";
-
-            DashboardMessageCssClass =
-                "connection-error";
-
+            SetDashboardMessage("Issue description is required.", false);
             return;
         }
 
@@ -1101,65 +791,41 @@
 
         try
         {
-            var httpClient =
-                HttpClientFactory.CreateClient(
-                    "SmartXApi");
+            var client = HttpClientFactory.CreateClient("SmartXApi");
 
             var issue = new UserIssue
             {
-                Title =
-                    NewIssueTitle.Trim(),
-
-                Description =
-                    NewIssueDescription.Trim(),
-
-                Severity =
-                    NewIssueSeverity,
-
-                Status =
-                    "Open"
+                Title = NewIssueTitle.Trim(),
+                Description = NewIssueDescription.Trim(),
+                Severity = NewIssueSeverity,
+                Status = "Open"
             };
 
-            var response =
-                await httpClient.PostAsJsonAsync(
-                    "api/dashboard/issues",
-                    issue);
+            using var response = await client.PostAsJsonAsync(
+                "api/dashboard/issues",
+                issue);
 
-            if (response.IsSuccessStatusCode)
+            if (!response.IsSuccessStatusCode)
             {
-                NewIssueTitle =
-                    string.Empty;
-
-                NewIssueDescription =
-                    string.Empty;
-
-                NewIssueSeverity =
-                    "Info";
-
-                DashboardMessage =
-                    "Incident added to the live engagement system.";
-
-                DashboardMessageCssClass =
-                    "connection-success";
-
-                await LoadEngagementAsync();
+                SetDashboardMessage(
+                    $"Issue could not be reported. HTTP {(int)response.StatusCode}.",
+                    false);
+                return;
             }
-            else
-            {
-                DashboardMessage =
-                    $"Issue could not be reported. HTTP {(int)response.StatusCode}.";
 
-                DashboardMessageCssClass =
-                    "connection-error";
-            }
+            NewIssueTitle = string.Empty;
+            NewIssueDescription = string.Empty;
+            NewIssueSeverity = "Info";
+
+            SetDashboardMessage(
+                "Incident added to the live engagement system.",
+                true);
+
+            await LoadEngagementAsync();
         }
         catch (HttpRequestException)
         {
-            DashboardMessage =
-                "Unable to connect to the Smart-X API.";
-
-            DashboardMessageCssClass =
-                "connection-error";
+            SetDashboardMessage("Unable to connect to the Smart-X API.", false);
         }
         finally
         {
@@ -1167,55 +833,38 @@
         }
     }
 
-    private async Task ResolveIssueAsync(
-        Guid issueId)
+    private async Task ResolveIssueAsync(Guid issueId)
     {
         if (IsResolvingIssue)
-        {
             return;
-        }
 
         IsResolvingIssue = true;
 
-        DashboardMessage = null;
-
         try
         {
-            var httpClient =
-                HttpClientFactory.CreateClient(
-                    "SmartXApi");
+            var client = HttpClientFactory.CreateClient("SmartXApi");
 
-            var response =
-                await httpClient.PutAsync(
-                    $"api/dashboard/issues/{issueId}/resolve",
-                    null);
+            using var response = await client.PutAsync(
+                $"api/dashboard/issues/{issueId}/resolve",
+                content: null);
 
-            if (response.IsSuccessStatusCode)
+            if (!response.IsSuccessStatusCode)
             {
-                DashboardMessage =
-                    "Incident resolved and engagement priorities updated.";
-
-                DashboardMessageCssClass =
-                    "connection-success";
-
-                await LoadEngagementAsync();
+                SetDashboardMessage(
+                    $"Issue could not be resolved. HTTP {(int)response.StatusCode}.",
+                    false);
+                return;
             }
-            else
-            {
-                DashboardMessage =
-                    $"Issue could not be resolved. HTTP {(int)response.StatusCode}.";
 
-                DashboardMessageCssClass =
-                    "connection-error";
-            }
+            SetDashboardMessage(
+                "Incident resolved and engagement priorities updated.",
+                true);
+
+            await LoadEngagementAsync();
         }
         catch (HttpRequestException)
         {
-            DashboardMessage =
-                "Unable to connect to the Smart-X API.";
-
-            DashboardMessageCssClass =
-                "connection-error";
+            SetDashboardMessage("Unable to connect to the Smart-X API.", false);
         }
         finally
         {
@@ -1223,64 +872,56 @@
         }
     }
 
-    private void StartLiveRefresh()
+    private void SetDashboardMessage(string message, bool success)
     {
-        _refreshCancellation =
-            new CancellationTokenSource();
-
-        _refreshTimer =
-            new PeriodicTimer(
-                TimeSpan.FromSeconds(10));
-
-        _ = RefreshLoopAsync(
-            _refreshCancellation.Token);
+        DashboardMessage = message;
+        DashboardMessageCssClass = success
+            ? "connection-success"
+            : "connection-error";
     }
 
-    private async Task RefreshLoopAsync(
-        CancellationToken cancellationToken)
+    private void StartLiveRefresh()
+    {
+        _refreshCancellation = new CancellationTokenSource();
+        _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(10));
+
+        _refreshTask = RefreshLoopAsync(_refreshCancellation.Token);
+    }
+
+    private async Task RefreshLoopAsync(CancellationToken cancellationToken)
     {
         if (_refreshTimer is null)
-        {
             return;
-        }
 
         try
         {
-            while (await _refreshTimer
-                .WaitForNextTickAsync(
-                    cancellationToken))
+            while (await _refreshTimer.WaitForNextTickAsync(cancellationToken))
             {
                 if (!GatewayOnline)
-                {
                     continue;
-                }
 
-                await InvokeAsync(
-                    async () =>
-                    {
-                        await LoadEngagementAsync();
-
-                        StateHasChanged();
-                    });
+                await InvokeAsync(async () =>
+                {
+                    await LoadEngagementAsync();
+                    StateHasChanged();
+                });
             }
         }
         catch (OperationCanceledException)
         {
+            // Normal component disposal.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Timer disposed during navigation.
         }
     }
 
     public void Dispose()
     {
-        try
-        {
-            _refreshCancellation?.Cancel();
-        }
-        catch
-        {
-        }
-
+        _refreshCancellation?.Cancel();
         _refreshTimer?.Dispose();
-
         _refreshCancellation?.Dispose();
+        _refreshLock.Dispose();
     }
 }
