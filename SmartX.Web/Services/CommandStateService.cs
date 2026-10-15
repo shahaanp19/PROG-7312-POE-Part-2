@@ -1,12 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.Extensions.Logging;
 
 namespace SmartX.Web.Services;
 
 public sealed class CommandStateService
 {
     private readonly object _sync = new();
+    private readonly ILogger<CommandStateService>? _logger;
 
     private readonly Queue<CommandRecord> _queue = new();
     private readonly List<CommandRecord> _history = new();
@@ -25,6 +27,12 @@ public sealed class CommandStateService
 
     private long _prioritySequence;
     private long _auditSequence;
+
+    public CommandStateService(
+        ILogger<CommandStateService>? logger = null)
+    {
+        _logger = logger;
+    }
 
     public event Action? StateChanged;
 
@@ -101,8 +109,9 @@ public sealed class CommandStateService
         get
         {
             lock (_sync)
-                return _queue.Count(command => command.Status == "Queued"
-                    && command.Priority == "Critical");
+                return _queue.Count(command =>
+                    command.Status == "Queued" &&
+                    command.Priority == "Critical");
         }
     }
 
@@ -113,10 +122,12 @@ public sealed class CommandStateService
         string? parameters)
     {
         if (string.IsNullOrWhiteSpace(deviceId))
-            throw new ArgumentException("A device ID is required.", nameof(deviceId));
+            throw new ArgumentException(
+                "A device ID is required.", nameof(deviceId));
 
         if (string.IsNullOrWhiteSpace(command))
-            throw new ArgumentException("A command is required.", nameof(command));
+            throw new ArgumentException(
+                "A command is required.", nameof(command));
 
         var record = new CommandRecord
         {
@@ -142,7 +153,8 @@ public sealed class CommandStateService
             _history.Insert(0, record);
             _undoStack.Push(record.Id);
 
-            if (!_commandsByDevice.TryGetValue(record.DeviceId, out var commands))
+            if (!_commandsByDevice.TryGetValue(
+                record.DeviceId, out var commands))
             {
                 commands = new List<CommandRecord>();
                 _commandsByDevice.Add(record.DeviceId, commands);
@@ -186,7 +198,8 @@ public sealed class CommandStateService
 
         lock (_sync)
         {
-            while (_priorityQueue.TryDequeue(out var candidate, out _))
+            while (_priorityQueue.TryDequeue(
+                out var candidate, out _))
             {
                 if (candidate.Status != "Queued")
                     continue;
@@ -216,7 +229,8 @@ public sealed class CommandStateService
             while (_undoStack.Count > 0)
             {
                 var id = _undoStack.Pop();
-                var candidate = _history.FirstOrDefault(item => item.Id == id);
+                var candidate = _history.FirstOrDefault(
+                    item => item.Id == id);
 
                 if (candidate is null || candidate.Status != "Queued")
                     continue;
@@ -234,7 +248,10 @@ public sealed class CommandStateService
             record.Details =
                 "Removed from the pending queue. No device action was reversed.";
 
-            AddAuditEntry(record, "Undone", "Pending command removed by undo.");
+            AddAuditEntry(
+                record,
+                "Undone",
+                "Pending command removed by undo.");
         }
 
         NotifyStateChanged();
@@ -256,7 +273,8 @@ public sealed class CommandStateService
                     continue;
 
                 record.Status = "Cleared";
-                record.Details = "Removed from the queue before processing.";
+                record.Details =
+                    "Removed from the queue before processing.";
 
                 AddAuditEntry(
                     record,
@@ -275,14 +293,16 @@ public sealed class CommandStateService
         return cleared;
     }
 
-    public IReadOnlyList<CommandRecord> GetCommandsForDevice(string? deviceId)
+    public IReadOnlyList<CommandRecord> GetCommandsForDevice(
+        string? deviceId)
     {
         if (string.IsNullOrWhiteSpace(deviceId))
             return Array.Empty<CommandRecord>();
 
         lock (_sync)
         {
-            return _commandsByDevice.TryGetValue(deviceId.Trim(), out var commands)
+            return _commandsByDevice.TryGetValue(
+                deviceId.Trim(), out var commands)
                 ? commands.ToArray()
                 : Array.Empty<CommandRecord>();
         }
@@ -342,11 +362,15 @@ public sealed class CommandStateService
         return removed;
     }
 
-    public bool TryGetCommand(Guid commandId, out CommandRecord? record)
+    public bool TryGetCommand(
+        Guid commandId,
+        out CommandRecord? record)
     {
         lock (_sync)
         {
-            record = _history.FirstOrDefault(command => command.Id == commandId);
+            record = _history.FirstOrDefault(
+                command => command.Id == commandId);
+
             return record is not null;
         }
     }
@@ -364,7 +388,9 @@ public sealed class CommandStateService
         NotifyStateChanged();
     }
 
-    private void MarkProcessed(CommandRecord record, string processingMode)
+    private void MarkProcessed(
+        CommandRecord record,
+        string processingMode)
     {
         record.Status = "Processed locally";
         record.Details =
@@ -447,15 +473,20 @@ public sealed class CommandStateService
         if (handlers is null)
             return;
 
-        foreach (Action handler in handlers.GetInvocationList())
+        foreach (var callback in handlers.GetInvocationList())
         {
+            if (callback is not Action handler)
+                continue;
+
             try
             {
                 handler.Invoke();
             }
-            catch
+            catch (Exception ex)
             {
-                // A UI subscriber must not interrupt state mutations.
+                _logger?.LogError(
+                    ex,
+                    "A CommandStateService StateChanged subscriber failed.");
             }
         }
     }

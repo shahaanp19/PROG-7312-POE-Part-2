@@ -1,4 +1,6 @@
-﻿@implements IDisposable
+﻿@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Routing
+@implements IDisposable
 @inject NavigationManager Navigation
 
 <nav class="pillar-nav" aria-label="Main navigation">
@@ -13,25 +15,44 @@
     </div>
 
     <div class="nav-links">
-        <NavLink href="/" Match="NavLinkMatch.All" class="nav-link">
-            <span class="nav-icon">⌂</span>
+        <NavLink href="/"
+                 Match="NavLinkMatch.All"
+                 class="nav-link">
+            <span class="nav-icon" aria-hidden="true">⌂</span>
             <span>Overview</span>
         </NavLink>
 
-        <NavLink href="/commands" Match="NavLinkMatch.All" class="nav-link">
-            <span class="nav-icon">⌘</span>
-            <span>Command Stream</span>
-            <span class="nav-pill">PART 2</span>
-        </NavLink>
+        <section class="nav-pillar @(IsCommandPillarActive ? "pillar-active" : "")"
+                 aria-label="Command Management">
+            <div class="pillar-heading">
+                <span class="nav-icon" aria-hidden="true">⌘</span>
+                <span>Command Management</span>
+                @if (IsCommandPillarActive)
+                {
+                    <span class="pillar-indicator"
+                          aria-label="Active section"></span>
+                }
+            </div>
 
-        <NavLink href="/command-history" Match="NavLinkMatch.All" class="nav-link">
-            <span class="nav-icon">◷</span>
-            <span>Command History</span>
-        </NavLink>
+            <div class="pillar-links">
+                <NavLink href="/commands"
+                         Match="NavLinkMatch.All"
+                         class="nav-link nav-child">
+                    <span>Command Stream</span>
+                    <span class="nav-pill">PART 2</span>
+                </NavLink>
+
+                <NavLink href="/command-history"
+                         Match="NavLinkMatch.All"
+                         class="nav-link nav-child">
+                    <span>Command History</span>
+                </NavLink>
+            </div>
+        </section>
     </div>
 
     <div class="nav-footer">
-        <span class="connection-dot"></span>
+        <span class="connection-dot" aria-hidden="true"></span>
         <span>Application online</span>
     </div>
 </nav>
@@ -41,7 +62,7 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 20px;
+        gap: 16px;
         width: 100%;
         min-height: 70px;
         padding: 0 28px;
@@ -50,7 +71,8 @@
         box-sizing: border-box;
     }
 
-    .nav-brand, .brand-link, .brand-copy, .nav-links, .nav-link, .nav-footer {
+    .nav-brand, .brand-link, .brand-copy,
+    .nav-links, .nav-link, .nav-footer {
         display: flex;
         align-items: center;
     }
@@ -67,6 +89,7 @@
         place-items: center;
         width: 36px;
         height: 36px;
+        flex-shrink: 0;
         border-radius: 9px;
         color: #fff;
         background: #3978ed;
@@ -95,13 +118,16 @@
     .nav-links {
         align-self: stretch;
         gap: 8px;
+        min-width: 0;
     }
 
     .nav-link {
         position: relative;
         justify-content: center;
         gap: 8px;
-        padding: 0 15px;
+        min-height: 44px;
+        padding: 0 12px;
+        border-radius: 6px;
         color: #65748a;
         text-decoration: none;
         font-size: 12px;
@@ -136,6 +162,49 @@
         line-height: 1;
     }
 
+    .nav-pillar {
+        display: flex;
+        align-items: stretch;
+        gap: 4px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        transition: background .15s ease, border-color .15s ease;
+    }
+
+        .nav-pillar.pillar-active {
+            background: #f0f5ff;
+            border-color: #cbdcff;
+        }
+
+    .pillar-heading {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 0 9px;
+        color: #52647e;
+        font-size: 11px;
+        font-weight: 800;
+        white-space: nowrap;
+    }
+
+    .pillar-active .pillar-heading {
+        color: #245fc1;
+    }
+
+    .pillar-indicator {
+        width: 7px;
+        height: 7px;
+        flex-shrink: 0;
+        border-radius: 50%;
+        background: #3978ed;
+    }
+
+    .pillar-links {
+        display: flex;
+        align-items: stretch;
+        gap: 2px;
+    }
+
     .nav-pill {
         padding: 4px 6px;
         border-radius: 4px;
@@ -155,43 +224,49 @@
     .connection-dot {
         width: 7px;
         height: 7px;
+        flex-shrink: 0;
         border-radius: 50%;
         background: #20a875;
         box-shadow: 0 0 0 3px #e5f7ed;
     }
 
-    @@media (max-width: 900px) {
+    @media (max-width: 1100px) {
         .pillar-nav {
             align-items: flex-start;
             flex-direction: column;
-            gap: 12px;
-            padding: 16px 20px 0;
+            gap: 10px;
+            padding: 14px 20px 0;
         }
 
         .nav-links {
             width: 100%;
-            min-height: 44px;
+            max-width: 100%;
+            min-height: 48px;
             overflow-x: auto;
-        }
-
-        .nav-link {
-            min-height: 44px;
-            padding: 0 12px;
+            overflow-y: hidden;
         }
 
         .nav-footer {
             display: none;
         }
+
+        .nav-pillar {
+            flex-shrink: 0;
+        }
+
+        .nav-link {
+            min-height: 44px;
+        }
     }
 
-    @@media (max-width: 480px) {
+    @media (max-width: 480px) {
         .pillar-nav {
             padding-right: 12px;
             padding-left: 12px;
         }
 
         .nav-links {
-            gap: 2px;
+            gap: 4px;
         }
 
         .nav-link {
@@ -200,15 +275,49 @@
             font-size: 11px;
         }
 
+        .pillar-heading {
+            gap: 5px;
+            padding: 0 7px;
+            font-size: 10px;
+        }
+
         .nav-pill {
             display: none;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .nav-link, .nav-pillar {
+            transition: none;
         }
     }
 </style>
 
 @code {
+    private bool IsCommandPillarActive =>
+        GetCurrentPath() is "commands" or "command-history";
+
+    protected override void OnInitialized()
+    {
+        Navigation.LocationChanged += HandleLocationChanged;
+    }
+
+    private string GetCurrentPath()
+    {
+        var relativePath = Navigation.ToBaseRelativePath(Navigation.Uri);
+        var path = relativePath.Split('?', '#')[0].Trim('/');
+        return path.ToLowerInvariant();
+    }
+
+    private void HandleLocationChanged(
+        object? sender,
+        LocationChangedEventArgs args)
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
     public void Dispose()
     {
-        // No event subscription is required; NavLink tracks navigation automatically.
+        Navigation.LocationChanged -= HandleLocationChanged;
     }
 }

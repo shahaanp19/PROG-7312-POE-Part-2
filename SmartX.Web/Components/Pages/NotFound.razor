@@ -1,5 +1,58 @@
 ﻿@page "/not-found"
-@layout MainLayout
+@layout Layout.MainLayout
 
-<h3>Not Found</h3>
-<p>Sorry, the content you are looking for does not exist.</p>
+<PageTitle>Page Not Found | Smart-X</PageTitle>
+
+<main class="not-found">
+    <p class="error-code">404</p>
+    <h1>Page not found</h1>
+    <p>The requested Smart-X page could not be found.</p>
+
+    <div class="actions">
+        <a href="/" class="action-link">Return to Overview</a>
+        <a href="/commands" class="action-link secondary">
+            Open Command Stream
+        </a>
+    </div>
+</main>
+
+<style>
+    .not-found {
+        max-width: 640px;
+        margin: 3rem auto;
+        padding: 2rem;
+        text-align: center;
+    }
+
+    .error-code {
+        margin: 0;
+        font-size: 4rem;
+        font-weight: 800;
+        opacity: 0.65;
+    }
+
+    .not-found h1 {
+        margin: 0.5rem 0 1rem;
+    }
+
+    .actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.75rem;
+        margin-top: 1.5rem;
+    }
+
+    .action-link {
+        display: inline-block;
+        padding: 0.75rem 1rem;
+        border-radius: 0.5rem;
+        background: var(--bs-primary, #0d6efd);
+        color: white;
+        text-decoration: none;
+    }
+
+        .action-link.secondary {
+            background: var(--bs-secondary, #6c757d);
+        }
+</style>
