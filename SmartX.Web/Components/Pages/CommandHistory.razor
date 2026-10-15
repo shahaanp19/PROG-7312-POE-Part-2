@@ -1,0 +1,282 @@
+﻿@page "/command-history"
+@using SmartX.Web.Services
+@implements IDisposable
+@inject CommandStateService CommandState
+
+<PageTitle>Command History | Smart-X</PageTitle>
+
+<div class="history-page">
+    <header class="page-heading">
+        <div>
+            <span class="eyebrow">PART 2 / COMMAND MANAGEMENT</span>
+            <h1>Command History &amp; Audit</h1>
+            <p>Review command lifecycle changes and audit events across the current interactive session.</p>
+        </div>
+        <a class="back-link" href="/commands">← Command Console</a>
+    </header>
+
+    <section class="stats-grid">
+        <article class="stat-card">
+            <span>Total Commands</span>
+            <strong>@History.Count</strong>
+        </article>
+        <article class="stat-card">
+            <span>Pending</span>
+            <strong>@History.Count(x => x.Status == "Queued")</strong>
+        </article>
+        <article class="stat-card">
+            <span>Processed</span>
+            <strong>@History.Count(x => x.Status == "Processed locally")</strong>
+        </article>
+        <article class="stat-card">
+            <span>Audit Events</span>
+            <strong>@AuditEntries.Count</strong>
+        </article>
+    </section>
+
+    <section class="panel">
+        <div class="panel-heading">
+            <div>
+                <h2>Command Records</h2>
+                <p>Search by device, command, priority, status, or parameters.</p>
+            </div>
+            <span class="count-badge">@FilteredHistory.Count records</span>
+        </div>
+
+        <div class="filters">
+            <div class="filter-field">
+                <label for="historySearch">Search records</label>
+                <input id="historySearch"
+                       @bind="_search"
+                       @bind:event="oninput"
+                       placeholder="Search commands or devices..." />
+            </div>
+            <div class="filter-field">
+                <label for="statusFilter">Status</label>
+                <select id="statusFilter" @bind="_statusFilter">
+                    <option value="All">All statuses</option>
+                    <option value="Queued">Queued</option>
+                    <option value="Processed locally">Processed locally</option>
+                    <option value="Undone">Undone</option>
+                    <option value="Cleared">Cleared</option>
+                </select>
+            </div>
+        </div>
+
+        @if (FilteredHistory.Count == 0)
+        {
+            <div class="empty-state">
+                <strong>No matching command records</strong>
+                <p>Try changing the search term or status filter.</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Created</th>
+                            <th>Device</th>
+                            <th>Command</th>
+                            <th>Priority</th>
+                            <th>Status</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var record in FilteredHistory)
+                        {
+                            <tr @key="record.Id">
+                                <td>@record.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                <td class="device">@record.DeviceId</td>
+                                <td>@record.Command</td>
+                                <td>
+                                    <span class="priority @PriorityClass(record.Priority)">
+                                        @record.Priority
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="status @StatusClass(record.Status)">
+                                        @record.Status
+                                    </span>
+                                </td>
+                                <td class="details">@record.Details</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <section class="panel">
+        <div class="panel-heading">
+            <div>
+                <h2>Audit Trail</h2>
+                <p>Timestamped records of submissions, processing, undo, queue clearing, and error changes.</p>
+            </div>
+            <span class="count-badge">@AuditEntries.Count events</span>
+        </div>
+
+        @if (AuditEntries.Count == 0)
+        {
+            <div class="empty-state">
+                <strong>No audit events recorded</strong>
+                <p>Audit entries will appear as you manage commands and errors.</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Action</th>
+                            <th>Device</th>
+                            <th>Command</th>
+                            <th>Error Key</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var entry in AuditEntries)
+                        {
+                            <tr @key="entry.Sequence">
+                                <td>@entry.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff")</td>
+                                <td><span class="action-tag">@entry.Action</span></td>
+                                <td class="device">@DisplayOrDash(entry.DeviceId)</td>
+                                <td>@DisplayOrDash(entry.Command)</td>
+                                <td>@DisplayOrDash(entry.ErrorKey)</td>
+                                <td class="details">@entry.Details</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+
+    <p class="disclaimer">
+        Records are maintained in memory by the current server-side application state.
+        They are not durable database records, and command processing does not execute physical device operations.
+    </p>
+</div>
+
+<style>
+    .history-page { max-width: 1440px; margin: 0 auto; color: #19243a; }
+    .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
+    .eyebrow { color: #3978ed; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; }
+    .page-heading h1 { margin: 9px 0 7px; font-size: clamp(25px, 3vw, 32px); font-weight: 800; }
+    .page-heading p { margin: 0; color: #718096; font-size: 13px; line-height: 1.6; }
+    .back-link { display: inline-block; padding: 10px 13px; border: 1px solid #dce4ef; border-radius: 7px; color: #35445d; background: white; text-decoration: none; font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .back-link:hover { border-color: #a8c4ff; background: #f7f9ff; }
+    .stats-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 15px; margin-bottom: 20px; }
+    .stat-card, .panel { min-width: 0; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; box-shadow: 0 2px 7px rgb(16 28 53 / 3%); }
+    .stat-card { padding: 19px 20px; display: flex; flex-direction: column; gap: 10px; }
+    .stat-card span { color: #718096; font-size: 12px; }
+    .stat-card strong { font-size: 28px; font-weight: 800; }
+    .panel { margin-bottom: 20px; overflow: hidden; }
+    .panel-heading { padding: 19px 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #edf0f5; }
+    .panel-heading h2 { margin: 0 0 5px; font-size: 16px; font-weight: 800; }
+    .panel-heading p { margin: 0; color: #718096; font-size: 12px; line-height: 1.6; }
+    .count-badge { padding: 6px 9px; border-radius: 5px; color: #536b91; background: #f0f4fa; font-size: 10px; font-weight: 750; white-space: nowrap; }
+    .filters { display: grid; grid-template-columns: minmax(0,2fr) minmax(180px,1fr); gap: 15px; padding: 18px 22px; }
+    .filter-field { display: flex; flex-direction: column; gap: 8px; }
+    .filter-field label { color: #46556d; font-size: 12px; font-weight: 700; }
+    .filter-field input, .filter-field select { width: 100%; min-height: 42px; padding: 10px 12px; border: 1px solid #dce3ed; border-radius: 6px; outline: none; color: #19243a; background: white; font: inherit; font-size: 12px; }
+    .filter-field input:focus, .filter-field select:focus { border-color: #3978ed; box-shadow: 0 0 0 3px rgb(57 120 237 / 12%); }
+    .table-wrap { width: 100%; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: left; white-space: nowrap; }
+    thead { background: #f8fafd; }
+    th { padding: 12px 17px; color: #718096; font-size: 10px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; }
+    td { padding: 14px 17px; border-top: 1px solid #edf0f5; color: #4c5b70; font-size: 12px; }
+    tbody tr:hover { background: #fafcff; }
+    .device { color: #243956; font-weight: 750; }
+    .details { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+    .priority, .status, .action-tag { display: inline-block; padding: 5px 7px; border-radius: 4px; font-size: 10px; font-weight: 750; }
+    .priority-normal { color: #53647e; background: #edf1f6; }
+    .priority-high { color: #9a5b00; background: #fff2d9; }
+    .priority-critical { color: #b42318; background: #ffebe9; }
+    .status-queued { color: #245fc1; background: #eaf1ff; }
+    .status-processed { color: #176b4a; background: #e5f7ed; }
+    .status-undone, .status-cleared { color: #6b5b91; background: #f0eafd; }
+    .action-tag { color: #536b91; background: #f0f4fa; }
+    .empty-state { padding: 36px 18px; text-align: center; }
+    .empty-state strong { font-size: 13px; }
+    .empty-state p { margin: 7px 0 0; color: #8290a4; font-size: 12px; }
+    .disclaimer { margin: 0 0 8px; color: #7c899b; font-size: 11px; line-height: 1.6; }
+
+    @@media (max-width: 900px) {
+        .stats-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    }
+
+    @@media (max-width: 600px) {
+        .page-heading { flex-direction: column; }
+        .stats-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+        .stat-card { padding: 15px; }
+        .panel-heading { padding: 16px; align-items: flex-start; }
+        .filters { grid-template-columns: 1fr; padding: 16px; }
+        .back-link { align-self: flex-start; }
+    }
+</style>
+
+@code {
+    private string _search = string.Empty;
+    private string _statusFilter = "All";
+
+    private IReadOnlyList<CommandRecord> History => CommandState.History;
+    private IReadOnlyList<CommandAuditEntry> AuditEntries => CommandState.AuditLog;
+
+    private List<CommandRecord> FilteredHistory =>
+        History
+            .Where(record =>
+                _statusFilter == "All" ||
+                string.Equals(record.Status, _statusFilter, StringComparison.OrdinalIgnoreCase))
+            .Where(record =>
+                string.IsNullOrWhiteSpace(_search) ||
+                record.DeviceId.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                record.Command.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                record.Priority.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                record.Status.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                record.Parameters.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                record.Details.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+    protected override void OnInitialized()
+    {
+        CommandState.StateChanged += HandleStateChanged;
+    }
+
+    private void HandleStateChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private static string DisplayOrDash(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "—" : value;
+
+    private static string PriorityClass(string priority) =>
+        priority.ToLowerInvariant() switch
+        {
+            "critical" => "priority-critical",
+            "high" => "priority-high",
+            _ => "priority-normal"
+        };
+
+    private static string StatusClass(string status) =>
+        status.ToLowerInvariant() switch
+        {
+            "queued" => "status-queued",
+            "processed locally" => "status-processed",
+            "undone" => "status-undone",
+            "cleared" => "status-cleared",
+            _ => "status-queued"
+        };
+
+    public void Dispose()
+    {
+        CommandState.StateChanged -= HandleStateChanged;
+    }
+}

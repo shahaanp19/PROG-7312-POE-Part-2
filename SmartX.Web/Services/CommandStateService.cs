@@ -60,10 +60,12 @@ public sealed class CommandStateService
         get
         {
             lock (_sync)
+            {
                 return _auditLog
                     .OrderByDescending(entry => entry.Timestamp)
                     .ThenByDescending(entry => entry.Sequence)
                     .ToArray();
+            }
         }
     }
 
@@ -99,8 +101,8 @@ public sealed class CommandStateService
         get
         {
             lock (_sync)
-                return _queue.Count(
-                    command => command.Priority == "Critical");
+                return _queue.Count(command => command.Status == "Queued"
+                    && command.Priority == "Critical");
         }
     }
 
@@ -111,35 +113,22 @@ public sealed class CommandStateService
         string? parameters)
     {
         if (string.IsNullOrWhiteSpace(deviceId))
-        {
-            throw new ArgumentException(
-                "A device ID is required.",
-                nameof(deviceId));
-        }
+            throw new ArgumentException("A device ID is required.", nameof(deviceId));
 
         if (string.IsNullOrWhiteSpace(command))
-        {
-            throw new ArgumentException(
-                "A command is required.",
-                nameof(command));
-        }
-
-        var normalizedDeviceId = deviceId.Trim();
-        var normalizedCommand = command.Trim();
-        var normalizedPriority = NormalizePriority(priority);
-        var normalizedParameters = parameters?.Trim() ?? string.Empty;
+            throw new ArgumentException("A command is required.", nameof(command));
 
         var record = new CommandRecord
         {
-            DeviceId = normalizedDeviceId,
-            Command = normalizedCommand,
-            Priority = normalizedPriority,
-            Parameters = normalizedParameters,
+            DeviceId = deviceId.Trim(),
+            Command = command.Trim(),
+            Priority = NormalizePriority(priority),
+            Parameters = parameters?.Trim() ?? string.Empty,
             CreatedAt = DateTimeOffset.UtcNow,
             Status = "Queued",
-            Details = normalizedParameters.Length == 0
+            Details = string.IsNullOrWhiteSpace(parameters)
                 ? "Submitted to the local command queue."
-                : $"Parameters: {normalizedParameters}"
+                : $"Parameters: {parameters.Trim()}"
         };
 
         lock (_sync)
@@ -153,15 +142,13 @@ public sealed class CommandStateService
             _history.Insert(0, record);
             _undoStack.Push(record.Id);
 
-            if (!_commandsByDevice.TryGetValue(
-                    record.DeviceId,
-                    out var deviceCommands))
+            if (!_commandsByDevice.TryGetValue(record.DeviceId, out var commands))
             {
-                deviceCommands = new List<CommandRecord>();
-                _commandsByDevice.Add(record.DeviceId, deviceCommands);
+                commands = new List<CommandRecord>();
+                _commandsByDevice.Add(record.DeviceId, commands);
             }
 
-            deviceCommands.Add(record);
+            commands.Add(record);
 
             AddAuditEntry(
                 record,
@@ -182,7 +169,11 @@ public sealed class CommandStateService
             if (!_queue.TryDequeue(out record))
                 return null;
 
+            if (record.Status != "Queued")
+                return null;
+
             MarkProcessed(record, "FIFO");
+            RemoveFromUndoStack(record.Id);
         }
 
         NotifyStateChanged();
@@ -195,9 +186,7 @@ public sealed class CommandStateService
 
         lock (_sync)
         {
-            while (_priorityQueue.TryDequeue(
-                       out var candidate,
-                       out _))
+            while (_priorityQueue.TryDequeue(out var candidate, out _))
             {
                 if (candidate.Status != "Queued")
                     continue;
@@ -210,6 +199,7 @@ public sealed class CommandStateService
                 return null;
 
             RemoveFromFifoQueue(record.Id);
+            RemoveFromUndoStack(record.Id);
             MarkProcessed(record, "priority scheduling");
         }
 
@@ -226,9 +216,7 @@ public sealed class CommandStateService
             while (_undoStack.Count > 0)
             {
                 var id = _undoStack.Pop();
-
-                var candidate = _history.FirstOrDefault(
-                    item => item.Id == id);
+                var candidate = _history.FirstOrDefault(item => item.Id == id);
 
                 if (candidate is null || candidate.Status != "Queued")
                     continue;
@@ -246,10 +234,7 @@ public sealed class CommandStateService
             record.Details =
                 "Removed from the pending queue. No device action was reversed.";
 
-            AddAuditEntry(
-                record,
-                "Undone",
-                "Pending command removed by undo.");
+            AddAuditEntry(record, "Undone", "Pending command removed by undo.");
         }
 
         NotifyStateChanged();
@@ -267,9 +252,11 @@ public sealed class CommandStateService
 
             foreach (var record in pending)
             {
+                if (record.Status != "Queued")
+                    continue;
+
                 record.Status = "Cleared";
-                record.Details =
-                    "Removed from the queue before processing.";
+                record.Details = "Removed from the queue before processing.";
 
                 AddAuditEntry(
                     record,
@@ -278,6 +265,8 @@ public sealed class CommandStateService
             }
 
             _queue.Clear();
+            _priorityQueue.Clear();
+            _undoStack.Clear();
         }
 
         if (cleared > 0)
@@ -286,17 +275,14 @@ public sealed class CommandStateService
         return cleared;
     }
 
-    public IReadOnlyList<CommandRecord> GetCommandsForDevice(
-        string? deviceId)
+    public IReadOnlyList<CommandRecord> GetCommandsForDevice(string? deviceId)
     {
         if (string.IsNullOrWhiteSpace(deviceId))
             return Array.Empty<CommandRecord>();
 
         lock (_sync)
         {
-            return _commandsByDevice.TryGetValue(
-                    deviceId.Trim(),
-                    out var commands)
+            return _commandsByDevice.TryGetValue(deviceId.Trim(), out var commands)
                 ? commands.ToArray()
                 : Array.Empty<CommandRecord>();
         }
@@ -307,20 +293,20 @@ public sealed class CommandStateService
         if (string.IsNullOrWhiteSpace(errorKey))
             return;
 
-        var normalizedKey = errorKey.Trim();
+        var key = errorKey.Trim();
         bool added;
 
         lock (_sync)
         {
-            added = _activeErrors.Add(normalizedKey);
+            added = _activeErrors.Add(key);
 
             if (added)
             {
                 AddAuditEntry(
                     null,
                     "Active error",
-                    $"Active error recorded: {normalizedKey}",
-                    normalizedKey);
+                    $"Active error recorded: {key}",
+                    key);
             }
         }
 
@@ -333,20 +319,20 @@ public sealed class CommandStateService
         if (string.IsNullOrWhiteSpace(errorKey))
             return false;
 
-        var normalizedKey = errorKey.Trim();
+        var key = errorKey.Trim();
         bool removed;
 
         lock (_sync)
         {
-            removed = _activeErrors.Remove(normalizedKey);
+            removed = _activeErrors.Remove(key);
 
             if (removed)
             {
                 AddAuditEntry(
                     null,
                     "Error resolved",
-                    $"Active error resolved: {normalizedKey}",
-                    normalizedKey);
+                    $"Active error resolved: {key}",
+                    key);
             }
         }
 
@@ -360,9 +346,7 @@ public sealed class CommandStateService
     {
         lock (_sync)
         {
-            record = _history.FirstOrDefault(
-                command => command.Id == commandId);
-
+            record = _history.FirstOrDefault(command => command.Id == commandId);
             return record is not null;
         }
     }
@@ -380,9 +364,7 @@ public sealed class CommandStateService
         NotifyStateChanged();
     }
 
-    private void MarkProcessed(
-        CommandRecord record,
-        string processingMode)
+    private void MarkProcessed(CommandRecord record, string processingMode)
     {
         record.Status = "Processed locally";
         record.Details =
@@ -407,6 +389,22 @@ public sealed class CommandStateService
             _queue.Enqueue(command);
     }
 
+    private void RemoveFromUndoStack(Guid id)
+    {
+        if (_undoStack.Count == 0)
+            return;
+
+        var remaining = _undoStack
+            .Where(commandId => commandId != id)
+            .Reverse()
+            .ToArray();
+
+        _undoStack.Clear();
+
+        foreach (var commandId in remaining)
+            _undoStack.Push(commandId);
+    }
+
     private void AddAuditEntry(
         CommandRecord? record,
         string action,
@@ -426,25 +424,21 @@ public sealed class CommandStateService
         });
     }
 
-    private static string NormalizePriority(string? priority)
-    {
-        return priority?.Trim().ToLowerInvariant() switch
+    private static string NormalizePriority(string? priority) =>
+        priority?.Trim().ToLowerInvariant() switch
         {
             "critical" => "Critical",
             "high" => "High",
             _ => "Normal"
         };
-    }
 
-    private static int GetPriorityRank(string priority)
-    {
-        return priority switch
+    private static int GetPriorityRank(string priority) =>
+        priority switch
         {
             "Critical" => 0,
             "High" => 1,
             _ => 2
         };
-    }
 
     private void NotifyStateChanged()
     {
@@ -461,7 +455,7 @@ public sealed class CommandStateService
             }
             catch
             {
-                // A failing UI subscriber must not break state mutations.
+                // A UI subscriber must not interrupt state mutations.
             }
         }
     }
@@ -470,38 +464,23 @@ public sealed class CommandStateService
 public sealed class CommandRecord
 {
     public Guid Id { get; init; } = Guid.NewGuid();
-
     public string DeviceId { get; init; } = string.Empty;
-
     public string Command { get; init; } = string.Empty;
-
     public string Priority { get; init; } = "Normal";
-
     public string Parameters { get; init; } = string.Empty;
-
-    public DateTimeOffset CreatedAt { get; init; } =
-        DateTimeOffset.UtcNow;
-
+    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     public string Status { get; set; } = "Queued";
-
     public string Details { get; set; } = string.Empty;
 }
 
 public sealed class CommandAuditEntry
 {
     public long Sequence { get; init; }
-
     public DateTimeOffset Timestamp { get; init; }
-
     public Guid? CommandId { get; init; }
-
     public string DeviceId { get; init; } = string.Empty;
-
     public string Command { get; init; } = string.Empty;
-
     public string Action { get; init; } = string.Empty;
-
     public string Details { get; init; } = string.Empty;
-
     public string? ErrorKey { get; init; }
 }

@@ -1,6 +1,4 @@
 ﻿@inherits LayoutComponentBase
-@implements IDisposable
-@inject NavigationManager Navigation
 
 <div class="app-shell">
     <header class="app-topbar">
@@ -20,104 +18,7 @@
         </div>
     </header>
 
-    <nav class="pillar-nav" aria-label="Main menu">
-        <div class="nav-heading-row">
-            <div>
-                <div class="nav-eyebrow">SMART-X PLATFORM</div>
-                <h2 class="nav-heading">Ecosystem Modules</h2>
-            </div>
-            <span class="module-counter">02 / 03 AVAILABLE</span>
-        </div>
-
-        <div class="nav-items">
-            <NavLink href="/"
-                     Match="NavLinkMatch.All"
-                     class="@Part1Class"
-                     aria-current="@Part1AriaCurrent"
-                     title="Open the sensor telemetry dashboard">
-                <span class="nav-number">01</span>
-                <span class="nav-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none">
-                        <path d="M3 12h3l3-8 5 16 3-8h4"
-                              stroke="currentColor"
-                              stroke-width="1.8"
-                              stroke-linecap="round"
-                              stroke-linejoin="round" />
-                    </svg>
-                </span>
-                <span class="nav-label">
-                    <strong>Sensor &amp; Telemetry</strong>
-                    <small>Part 1 · Data ingestion</small>
-                </span>
-                <span class="nav-status">
-                    <span class="nav-status-dot" aria-hidden="true"></span>
-                    AVAILABLE
-                </span>
-            </NavLink>
-
-            <NavLink href="/commands"
-                     Match="NavLinkMatch.Prefix"
-                     class="@Part2Class"
-                     aria-current="@Part2AriaCurrent"
-                     title="Open command operations, queue management and history">
-                <span class="nav-number">02</span>
-                <span class="nav-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none">
-                        <path d="M4 5h16M4 12h10M4 19h16"
-                              stroke="currentColor"
-                              stroke-width="1.8"
-                              stroke-linecap="round" />
-                        <circle cx="18" cy="12" r="2"
-                                stroke="currentColor"
-                                stroke-width="1.8" />
-                    </svg>
-                </span>
-                <span class="nav-label">
-                    <strong>Command Stream</strong>
-                    <small>Part 2 · Commands &amp; history</small>
-                </span>
-                <span class="nav-status">
-                    <span class="nav-status-dot" aria-hidden="true"></span>
-                    AVAILABLE
-                </span>
-            </NavLink>
-
-            <button type="button"
-                    class="nav-item nav-disabled"
-                    disabled
-                    aria-disabled="true"
-                    title="Network topology will be available in the final PoE">
-                <span class="nav-number">03</span>
-                <span class="nav-icon" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" fill="none">
-                        <circle cx="12" cy="5" r="2.5"
-                                stroke="currentColor"
-                                stroke-width="1.7" />
-                        <circle cx="5" cy="19" r="2.5"
-                                stroke="currentColor"
-                                stroke-width="1.7" />
-                        <circle cx="19" cy="19" r="2.5"
-                                stroke="currentColor"
-                                stroke-width="1.7" />
-                        <path d="M10.8 7.2 6.2 16.7M13.2 7.2l4.6 9.5M7.5 19h9"
-                              stroke="currentColor"
-                              stroke-width="1.7"
-                              stroke-linecap="round" />
-                    </svg>
-                </span>
-                <span class="nav-label">
-                    <strong>Network Topology</strong>
-                    <small>Part 3 · Mesh visualization</small>
-                </span>
-                <span class="nav-status coming-soon">LOCKED</span>
-            </button>
-        </div>
-
-        <div class="nav-footer">
-            <span class="nav-footer-indicator" aria-hidden="true"></span>
-            <span>Navigation preserves the active application session.</span>
-        </div>
-    </nav>
+    <NavMenu />
 
     <main class="app-main" id="main-content" tabindex="-1">
         @Body
@@ -128,6 +29,7 @@
             <span class="footer-mark">S</span>
             <span>SMART-X <span class="footer-separator">/</span> IoT GATEWAY</span>
         </div>
+
         <div class="footer-meta">
             <span>Telemetry</span>
             <span class="footer-bullet" aria-hidden="true"></span>
@@ -146,11 +48,13 @@
             <small>An unexpected application error occurred.</small>
         </span>
     </div>
+
     <div class="error-ui-actions">
         <a href="" class="reload">Reload application</a>
         <button type="button"
                 class="dismiss"
-                aria-label="Dismiss error notification">
+                aria-label="Dismiss error notification"
+                onclick="document.getElementById('blazor-error-ui').style.display='none'">
             ×
         </button>
     </div>
@@ -159,18 +63,14 @@
 <style>
     :root {
         --sx-navy: #101a2e;
-        --sx-navy-raised: #182640;
         --sx-blue: #3978ed;
         --sx-blue-strong: #245fd1;
-        --sx-blue-soft: #edf3ff;
         --sx-text: #19243a;
         --sx-muted: #718096;
         --sx-border: #e2e8f0;
         --sx-surface: #ffffff;
         --sx-background: #f4f7fb;
         --sx-green: #20a875;
-        --sx-radius: 12px;
-        --sx-transition: 160ms ease;
     }
 
     .app-shell {
@@ -255,17 +155,12 @@
         font-weight: 600;
     }
 
-    .status-dot,
-    .nav-status-dot,
-    .nav-footer-indicator {
+    .status-dot {
         width: 8px;
         height: 8px;
         flex: 0 0 8px;
         border-radius: 50%;
         background: var(--sx-green);
-    }
-
-    .status-dot {
         box-shadow: 0 0 0 4px rgb(32 168 117 / 13%);
     }
 
@@ -281,213 +176,6 @@
         font-size: 9px;
         font-weight: 800;
         letter-spacing: 1px;
-    }
-
-    .pillar-nav {
-        padding: 24px 34px 18px;
-        background: var(--sx-surface);
-        border-bottom: 1px solid var(--sx-border);
-    }
-
-    .nav-heading-row {
-        margin-bottom: 16px;
-        display: flex;
-        align-items: flex-end;
-        justify-content: space-between;
-        gap: 16px;
-    }
-
-    .nav-eyebrow {
-        margin-bottom: 5px;
-        color: var(--sx-blue-strong);
-        font-size: 9px;
-        font-weight: 850;
-        letter-spacing: 1.6px;
-    }
-
-    .nav-heading {
-        margin: 0;
-        color: var(--sx-text);
-        font-size: 17px;
-        font-weight: 800;
-        letter-spacing: -.35px;
-    }
-
-    .module-counter {
-        padding: 6px 9px;
-        border: 1px solid var(--sx-border);
-        border-radius: 6px;
-        color: var(--sx-muted);
-        background: #f8fafc;
-        font-size: 9px;
-        font-weight: 800;
-        letter-spacing: .65px;
-        white-space: nowrap;
-    }
-
-    .nav-items {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 12px;
-    }
-
-    .nav-item {
-        position: relative;
-        min-width: 0;
-        min-height: 86px;
-        padding: 14px;
-        display: flex;
-        align-items: center;
-        gap: 11px;
-        overflow: hidden;
-        border: 1px solid var(--sx-border);
-        border-radius: var(--sx-radius);
-        color: var(--sx-text);
-        background: #fff;
-        text-align: left;
-        text-decoration: none;
-        transition: border-color var(--sx-transition), background var(--sx-transition), box-shadow var(--sx-transition), transform var(--sx-transition);
-    }
-
-    a.nav-item:hover {
-        border-color: #b5ccfa;
-        background: #fafcff;
-    }
-
-    a.nav-item:focus-visible {
-        outline: 3px solid rgb(57 120 237 / 35%);
-        outline-offset: 3px;
-    }
-
-    .nav-item.pillar-selected {
-        border-color: var(--sx-blue);
-        background: var(--sx-blue-soft);
-        box-shadow: inset 0 0 0 1px var(--sx-blue);
-    }
-
-    .nav-number {
-        width: 29px;
-        height: 29px;
-        flex: 0 0 29px;
-        display: grid;
-        place-items: center;
-        border: 1px solid #e1e7f0;
-        border-radius: 8px;
-        color: #68778d;
-        background: #f1f4f8;
-        font-size: 10px;
-        font-weight: 850;
-        font-variant-numeric: tabular-nums;
-    }
-
-    .pillar-selected .nav-number {
-        border-color: var(--sx-blue);
-        color: #fff;
-        background: var(--sx-blue);
-    }
-
-    .nav-icon {
-        width: 31px;
-        height: 31px;
-        flex: 0 0 31px;
-        display: grid;
-        place-items: center;
-        border-radius: 8px;
-        color: #65758e;
-        background: #f3f6fa;
-    }
-
-        .nav-icon svg {
-            width: 19px;
-            height: 19px;
-        }
-
-    .pillar-selected .nav-icon {
-        color: var(--sx-blue-strong);
-        background: #dce8ff;
-    }
-
-    .nav-label {
-        min-width: 0;
-        flex: 1 1 auto;
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-    }
-
-        .nav-label strong {
-            overflow: hidden;
-            color: #26344a;
-            font-size: 12px;
-            font-weight: 800;
-            line-height: 1.4;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .nav-label small {
-            overflow: hidden;
-            color: var(--sx-muted);
-            font-size: 10px;
-            line-height: 1.4;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-    .nav-status {
-        align-self: flex-start;
-        flex: 0 0 auto;
-        padding: 5px 6px;
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        border: 1px solid #d3eee3;
-        border-radius: 5px;
-        color: #197b58;
-        background: #effaf5;
-        font-size: 8px;
-        font-weight: 850;
-        letter-spacing: .3px;
-        white-space: nowrap;
-    }
-
-    .nav-status-dot {
-        width: 6px;
-        height: 6px;
-        flex-basis: 6px;
-    }
-
-    .nav-disabled {
-        cursor: not-allowed;
-        opacity: .57;
-    }
-
-        .nav-disabled .nav-number,
-        .nav-disabled .nav-icon {
-            color: #7b8798;
-            background: #edf0f4;
-        }
-
-    .coming-soon {
-        border-color: #e2e7ee;
-        color: #687386;
-        background: #f0f2f5;
-    }
-
-    .nav-footer {
-        margin-top: 13px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        color: var(--sx-muted);
-        font-size: 10px;
-    }
-
-    .nav-footer-indicator {
-        width: 6px;
-        height: 6px;
-        flex-basis: 6px;
-        background: #7c94b9;
     }
 
     .app-main {
@@ -641,7 +329,6 @@
 
     @@media (min-width: 1500px) {
         .app-topbar,
-        .pillar-nav,
         .app-footer {
             padding-right: max(34px, calc((100vw - 1600px) / 2));
             padding-left: max(34px, calc((100vw - 1600px) / 2));
@@ -650,20 +337,6 @@
         .app-main {
             padding-right: max(34px, calc((100vw - 1600px) / 2));
             padding-left: max(34px, calc((100vw - 1600px) / 2));
-        }
-    }
-
-    @@media (max-width: 1100px) {
-        .nav-items {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-
-        .nav-disabled {
-            grid-column: 1 / -1;
-        }
-
-        .nav-item {
-            min-height: 76px;
         }
     }
 
@@ -676,23 +349,6 @@
         .gateway-status-label,
         .gateway-status-divider {
             display: none;
-        }
-
-        .pillar-nav {
-            padding: 21px 20px 16px;
-        }
-
-        .nav-items {
-            grid-template-columns: 1fr;
-            gap: 9px;
-        }
-
-        .nav-disabled {
-            grid-column: auto;
-        }
-
-        .nav-item {
-            min-height: 69px;
         }
 
         .app-main {
@@ -726,53 +382,6 @@
         .gateway-status {
             gap: 7px;
             font-size: 10px;
-        }
-
-        .pillar-nav {
-            padding: 18px 14px 14px;
-        }
-
-        .nav-heading {
-            font-size: 15px;
-        }
-
-        .module-counter {
-            font-size: 8px;
-        }
-
-        .nav-item {
-            padding: 12px 10px;
-            gap: 8px;
-        }
-
-        .nav-number {
-            width: 26px;
-            height: 26px;
-            flex-basis: 26px;
-        }
-
-        .nav-icon {
-            width: 27px;
-            height: 27px;
-            flex-basis: 27px;
-        }
-
-        .nav-label strong {
-            font-size: 11px;
-        }
-
-        .nav-label small {
-            font-size: 9px;
-        }
-
-        .nav-status {
-            padding: 4px;
-            font-size: 7px;
-        }
-
-        .nav-footer {
-            align-items: flex-start;
-            line-height: 1.5;
         }
 
         .app-main {
@@ -824,72 +433,3 @@
         }
     }
 </style>
-
-@code {
-    private string CurrentPillar { get; set; } = "part1";
-
-    private string Part1Class =>
-        CurrentPillar == "part1"
-            ? "nav-item pillar-selected"
-            : "nav-item";
-
-    private string Part2Class =>
-        CurrentPillar == "part2"
-            ? "nav-item pillar-selected"
-            : "nav-item";
-
-    private string? Part1AriaCurrent =>
-        CurrentPillar == "part1" ? "page" : null;
-
-    private string? Part2AriaCurrent =>
-        CurrentPillar == "part2" ? "page" : null;
-
-    protected override void OnInitialized()
-    {
-        UpdateCurrentPillar();
-        Navigation.LocationChanged += OnLocationChanged;
-    }
-
-    private void OnLocationChanged(
-        object? sender,
-        LocationChangedEventArgs args)
-    {
-        _ = InvokeAsync(() =>
-        {
-            UpdateCurrentPillar();
-            StateHasChanged();
-        });
-    }
-
-    private void UpdateCurrentPillar()
-    {
-        var relativePath = Navigation.ToBaseRelativePath(Navigation.Uri);
-
-        var queryIndex = relativePath.IndexOf('?');
-        if (queryIndex >= 0)
-        {
-            relativePath = relativePath[..queryIndex];
-        }
-
-        var fragmentIndex = relativePath.IndexOf('#');
-        if (fragmentIndex >= 0)
-        {
-            relativePath = relativePath[..fragmentIndex];
-        }
-
-        var path = relativePath.Trim('/');
-
-        CurrentPillar =
-            path.Equals("commands", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWith("commands/", StringComparison.OrdinalIgnoreCase)
-            || path.Equals("command-history", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWith("command-history/", StringComparison.OrdinalIgnoreCase)
-                ? "part2"
-                : "part1";
-    }
-
-    public void Dispose()
-    {
-        Navigation.LocationChanged -= OnLocationChanged;
-    }
-}

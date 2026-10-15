@@ -1,0 +1,214 @@
+﻿@implements IDisposable
+@inject NavigationManager Navigation
+
+<nav class="pillar-nav" aria-label="Main navigation">
+    <div class="nav-brand">
+        <a href="/" class="brand-link" aria-label="Smart-X dashboard">
+            <span class="brand-mark">S</span>
+            <span class="brand-copy">
+                <strong>SMART-X</strong>
+                <small>IoT MESH ECOSYSTEM</small>
+            </span>
+        </a>
+    </div>
+
+    <div class="nav-links">
+        <NavLink href="/" Match="NavLinkMatch.All" class="nav-link">
+            <span class="nav-icon">⌂</span>
+            <span>Overview</span>
+        </NavLink>
+
+        <NavLink href="/commands" Match="NavLinkMatch.All" class="nav-link">
+            <span class="nav-icon">⌘</span>
+            <span>Command Stream</span>
+            <span class="nav-pill">PART 2</span>
+        </NavLink>
+
+        <NavLink href="/command-history" Match="NavLinkMatch.All" class="nav-link">
+            <span class="nav-icon">◷</span>
+            <span>Command History</span>
+        </NavLink>
+    </div>
+
+    <div class="nav-footer">
+        <span class="connection-dot"></span>
+        <span>Application online</span>
+    </div>
+</nav>
+
+<style>
+    .pillar-nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        width: 100%;
+        min-height: 70px;
+        padding: 0 28px;
+        background: #fff;
+        border-bottom: 1px solid #e2e8f0;
+        box-sizing: border-box;
+    }
+
+    .nav-brand, .brand-link, .brand-copy, .nav-links, .nav-link, .nav-footer {
+        display: flex;
+        align-items: center;
+    }
+
+    .brand-link {
+        gap: 11px;
+        color: inherit;
+        text-decoration: none;
+        flex-shrink: 0;
+    }
+
+    .brand-mark {
+        display: grid;
+        place-items: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 9px;
+        color: #fff;
+        background: #3978ed;
+        font-size: 20px;
+        font-weight: 900;
+    }
+
+    .brand-copy {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 3px;
+    }
+
+        .brand-copy strong {
+            color: #19243a;
+            font-size: 14px;
+            letter-spacing: 1px;
+        }
+
+        .brand-copy small {
+            color: #8290a4;
+            font-size: 9px;
+            letter-spacing: .9px;
+        }
+
+    .nav-links {
+        align-self: stretch;
+        gap: 8px;
+    }
+
+    .nav-link {
+        position: relative;
+        justify-content: center;
+        gap: 8px;
+        padding: 0 15px;
+        color: #65748a;
+        text-decoration: none;
+        font-size: 12px;
+        font-weight: 700;
+        white-space: nowrap;
+        transition: color .15s ease, background .15s ease;
+    }
+
+        .nav-link:hover {
+            color: #245fc1;
+            background: #f7f9ff;
+        }
+
+        .nav-link.active {
+            color: #245fc1;
+            background: #f0f5ff;
+        }
+
+            .nav-link.active::after {
+                position: absolute;
+                right: 12px;
+                bottom: -1px;
+                left: 12px;
+                height: 3px;
+                border-radius: 3px 3px 0 0;
+                background: #3978ed;
+                content: "";
+            }
+
+    .nav-icon {
+        font-size: 17px;
+        line-height: 1;
+    }
+
+    .nav-pill {
+        padding: 4px 6px;
+        border-radius: 4px;
+        color: #245fc1;
+        background: #e4edff;
+        font-size: 9px;
+        font-weight: 800;
+    }
+
+    .nav-footer {
+        gap: 8px;
+        color: #718096;
+        font-size: 11px;
+        white-space: nowrap;
+    }
+
+    .connection-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #20a875;
+        box-shadow: 0 0 0 3px #e5f7ed;
+    }
+
+    @@media (max-width: 900px) {
+        .pillar-nav {
+            align-items: flex-start;
+            flex-direction: column;
+            gap: 12px;
+            padding: 16px 20px 0;
+        }
+
+        .nav-links {
+            width: 100%;
+            min-height: 44px;
+            overflow-x: auto;
+        }
+
+        .nav-link {
+            min-height: 44px;
+            padding: 0 12px;
+        }
+
+        .nav-footer {
+            display: none;
+        }
+    }
+
+    @@media (max-width: 480px) {
+        .pillar-nav {
+            padding-right: 12px;
+            padding-left: 12px;
+        }
+
+        .nav-links {
+            gap: 2px;
+        }
+
+        .nav-link {
+            gap: 6px;
+            padding: 0 9px;
+            font-size: 11px;
+        }
+
+        .nav-pill {
+            display: none;
+        }
+    }
+</style>
+
+@code {
+    public void Dispose()
+    {
+        // No event subscription is required; NavLink tracks navigation automatically.
+    }
+}
