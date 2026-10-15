@@ -1,0 +1,238 @@
+﻿.pillar-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    width: 100%;
+    min-height: 70px;
+    padding: 0 28px;
+    background: #fff;
+    border-bottom: 1px solid #e2e8f0;
+    box-sizing: border-box;
+}
+
+.nav-brand,
+.brand-link,
+.brand-copy,
+.nav-links,
+.nav-link,
+.nav-footer {
+    display: flex;
+    align-items: center;
+}
+
+.brand-link {
+    gap: 11px;
+    color: inherit;
+    text-decoration: none;
+    flex-shrink: 0;
+}
+
+.brand-mark {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border-radius: 9px;
+    color: #fff;
+    background: #3978ed;
+    font-size: 20px;
+    font-weight: 900;
+}
+
+.brand-copy {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+}
+
+    .brand-copy strong {
+        color: #19243a;
+        font-size: 14px;
+        letter-spacing: 1px;
+    }
+
+    .brand-copy small {
+        color: #8290a4;
+        font-size: 9px;
+        letter-spacing: .9px;
+    }
+
+.nav-links {
+    align-self: stretch;
+    gap: 8px;
+    min-width: 0;
+}
+
+.nav-link {
+    position: relative;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 0 12px;
+    border-radius: 6px;
+    color: #65748a;
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    transition: color .15s ease, background .15s ease;
+}
+
+    .nav-link:hover {
+        color: #245fc1;
+        background: #f7f9ff;
+    }
+
+    .nav-link.active {
+        color: #245fc1;
+        background: #f0f5ff;
+    }
+
+        .nav-link.active::after {
+            position: absolute;
+            right: 12px;
+            bottom: -1px;
+            left: 12px;
+            height: 3px;
+            border-radius: 3px 3px 0 0;
+            background: #3978ed;
+            content: "";
+        }
+
+.nav-icon {
+    font-size: 17px;
+    line-height: 1;
+}
+
+.nav-pillar {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    transition: background .15s ease, border-color .15s ease;
+}
+
+    .nav-pillar.pillar-active {
+        background: #f0f5ff;
+        border-color: #cbdcff;
+    }
+
+.pillar-heading {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 9px;
+    color: #52647e;
+    font-size: 11px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.pillar-active .pillar-heading {
+    color: #245fc1;
+}
+
+.pillar-indicator {
+    width: 7px;
+    height: 7px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: #3978ed;
+}
+
+.pillar-links {
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+}
+
+.nav-pill {
+    padding: 4px 6px;
+    border-radius: 4px;
+    color: #245fc1;
+    background: #e4edff;
+    font-size: 9px;
+    font-weight: 800;
+}
+
+.nav-footer {
+    gap: 8px;
+    color: #718096;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.connection-dot {
+    width: 7px;
+    height: 7px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: #20a875;
+    box-shadow: 0 0 0 3px #e5f7ed;
+}
+
+@media (max-width: 1100px) {
+    .pillar-nav {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 10px;
+        padding: 14px 20px 0;
+    }
+
+    .nav-links {
+        width: 100%;
+        max-width: 100%;
+        min-height: 48px;
+        overflow-x: auto;
+        overflow-y: hidden;
+    }
+
+    .nav-footer {
+        display: none;
+    }
+
+    .nav-pillar {
+        flex-shrink: 0;
+    }
+
+    .nav-link {
+        min-height: 44px;
+    }
+}
+
+@media (max-width: 480px) {
+    .pillar-nav {
+        padding-right: 12px;
+        padding-left: 12px;
+    }
+
+    .nav-links {
+        gap: 4px;
+    }
+
+    .nav-link {
+        gap: 6px;
+        padding: 0 9px;
+        font-size: 11px;
+    }
+
+    .pillar-heading {
+        gap: 5px;
+        padding: 0 7px;
+        font-size: 10px;
+    }
+
+    .nav-pill {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .nav-link,
+    .nav-pillar {
+        transition: none;
+    }
+}

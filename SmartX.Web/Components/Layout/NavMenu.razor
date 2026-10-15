@@ -51,6 +51,12 @@
                          class="nav-link nav-child">
                     <span>Command History</span>
                 </NavLink>
+
+                <NavLink href="/collection-diagnostics"
+                         Match="NavLinkMatch.All"
+                         class="nav-link nav-child">
+                    <span>Collection Diagnostics</span>
+                </NavLink>
             </div>
         </section>
     </div>
@@ -63,7 +69,10 @@
 
 @code {
     private bool IsCommandPillarActive =>
-        GetCurrentPath() is "commands" or "command-history";
+        GetCurrentPath() is
+            "commands" or
+            "command-history" or
+            "collection-diagnostics";
 
     private string CommandPillarClass =>
         IsCommandPillarActive

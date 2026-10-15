@@ -1,0 +1,269 @@
+﻿@page "/"
+
+<PageTitle>Smart-X | IoT Mesh Ecosystem</PageTitle>
+
+<div class="dashboard-page">
+    <header class="dashboard-header">
+        <div>
+            <span class="eyebrow">SMART-X / IOT MESH ECOSYSTEM</span>
+            <h1>System Overview</h1>
+            <p>Monitor your command management workspace and access the available modules.</p>
+        </div>
+
+        <span class="online-indicator">
+            <span class="online-dot"></span>
+            Interactive session
+        </span>
+    </header>
+
+    <section class="overview-grid" aria-label="Available modules">
+        <article class="overview-card">
+            <div class="card-icon" aria-hidden="true">⌘</div>
+            <span class="card-eyebrow">COMMAND MANAGEMENT</span>
+            <h2>Command Stream</h2>
+            <p>
+                Submit commands, inspect the pending priority queue, process
+                critical alerts, and manage pending operations.
+            </p>
+            <a class="module-link" href="/commands">
+                Open Command Console <span aria-hidden="true">→</span>
+            </a>
+        </article>
+
+        <article class="overview-card">
+            <div class="card-icon history-icon" aria-hidden="true">≡</div>
+            <span class="card-eyebrow">AUDIT &amp; TRACEABILITY</span>
+            <h2>Command History</h2>
+            <p>
+                Review command statuses, filter recorded activity, and inspect
+                timestamped audit events.
+            </p>
+            <a class="module-link" href="/command-history">
+                View Command History <span aria-hidden="true">→</span>
+            </a>
+        </article>
+
+        <article class="overview-card">
+            <div class="card-icon diagnostics-icon" aria-hidden="true">✓</div>
+            <span class="card-eyebrow">VALIDATION &amp; TESTING</span>
+            <h2>Collection Diagnostics</h2>
+            <p>
+                Run collection diagnostics to verify priority ordering, FIFO
+                behaviour, stack-based undo, audit history, and concurrent
+                command submissions.
+            </p>
+            <a class="module-link" href="/collection-diagnostics">
+                Run Diagnostics <span aria-hidden="true">→</span>
+            </a>
+        </article>
+    </section>
+
+    <section class="overview-notice" aria-labelledby="session-information-title">
+        <span class="notice-icon" aria-hidden="true">i</span>
+        <div>
+            <h2 id="session-information-title">Session information</h2>
+            <p>
+                Command records and audit events are maintained in server-side
+                application state for the current Blazor circuit. Commands are
+                simulated locally and do not execute physical device operations.
+            </p>
+        </div>
+    </section>
+</div>
+
+<style>
+    .dashboard-page {
+        max-width: 1440px;
+        margin: 0 auto;
+        color: #19243a;
+    }
+
+    .dashboard-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 30px;
+    }
+
+    .eyebrow {
+        color: #3978ed;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 1.5px;
+    }
+
+    .dashboard-header h1 {
+        margin: 9px 0 7px;
+        font-size: clamp(26px, 3vw, 34px);
+        font-weight: 800;
+    }
+
+    .dashboard-header p {
+        margin: 0;
+        color: #718096;
+        font-size: 13px;
+        line-height: 1.7;
+    }
+
+    .online-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 12px;
+        border: 1px solid #dceee4;
+        border-radius: 7px;
+        color: #176b4a;
+        background: #f1faf5;
+        font-size: 11px;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .online-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #16a36a;
+    }
+
+    .overview-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+    }
+
+    .overview-card {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        min-width: 0;
+        padding: 26px;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        background: #fff;
+        box-shadow: 0 2px 7px rgb(16 28 53 / 3%);
+    }
+
+    .card-icon {
+        display: grid;
+        width: 44px;
+        height: 44px;
+        margin-bottom: 23px;
+        place-items: center;
+        border-radius: 9px;
+        color: #245fc1;
+        background: #eaf1ff;
+        font-size: 23px;
+        font-weight: 700;
+    }
+
+    .history-icon {
+        color: #176b4a;
+        background: #e5f7ed;
+    }
+
+    .diagnostics-icon {
+        color: #7650bd;
+        background: #f0eaff;
+    }
+
+    .card-eyebrow {
+        color: #718096;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 1px;
+    }
+
+    .overview-card h2 {
+        margin: 9px 0;
+        color: #19243a;
+        font-size: 21px;
+        font-weight: 800;
+    }
+
+    .overview-card p {
+        flex: 1;
+        margin: 0 0 24px;
+        color: #718096;
+        font-size: 13px;
+        line-height: 1.8;
+    }
+
+    .module-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 13px;
+        border: 1px solid #dce4ef;
+        border-radius: 6px;
+        color: #245fc1;
+        background: #fff;
+        font-size: 12px;
+        font-weight: 750;
+        text-decoration: none;
+        transition: background .15s ease, border-color .15s ease;
+    }
+
+        .module-link:hover {
+            border-color: #a8c4ff;
+            background: #f7f9ff;
+        }
+
+        .module-link:focus-visible {
+            outline: 3px solid rgb(57 120 237 / 30%);
+            outline-offset: 2px;
+        }
+
+    .overview-notice {
+        display: flex;
+        align-items: flex-start;
+        gap: 13px;
+        margin-top: 22px;
+        padding: 18px 20px;
+        border: 1px solid #e2e8f0;
+        border-radius: 9px;
+        background: #f8fafd;
+    }
+
+    .notice-icon {
+        display: grid;
+        flex: 0 0 24px;
+        width: 24px;
+        height: 24px;
+        place-items: center;
+        border-radius: 50%;
+        color: #536b91;
+        background: #e7edf6;
+        font-size: 12px;
+        font-weight: 800;
+    }
+
+    .overview-notice h2 {
+        margin: 2px 0 6px;
+        font-size: 13px;
+        font-weight: 800;
+    }
+
+    .overview-notice p {
+        margin: 0;
+        color: #718096;
+        font-size: 12px;
+        line-height: 1.7;
+    }
+
+    @@media (max-width: 700px) {
+        .dashboard-header {
+            flex-direction: column;
+        }
+
+        .overview-grid {
+            grid-template-columns: 1fr;
+            gap: 14px;
+        }
+
+        .overview-card {
+            padding: 21px;
+        }
+    }
+</style>

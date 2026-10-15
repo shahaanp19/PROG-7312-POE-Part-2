@@ -1,6 +1,6 @@
-
 using SmartX.Web.Components;
 using SmartX.Web.Services;
+using System.Net.Http.Headers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -29,15 +29,15 @@ builder.Services.AddHttpClient("SmartXApi", client =>
 
     client.DefaultRequestHeaders.Accept.Clear();
     client.DefaultRequestHeaders.Accept.Add(
-        new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue(
-            "application/json"));
+        new MediaTypeWithQualityHeaderValue("application/json"));
 });
 
-// Retain command state while navigating within the user's Blazor circuit.
+// Per-circuit command state and recommendations.
 builder.Services.AddScoped<CommandStateService>();
-
-// Predictive recommendations based on command and telemetry activity.
 builder.Services.AddScoped<RecommendationEngine>();
+
+// Asynchronous critical-alert pipeline, scoped to the Blazor circuit.
+builder.Services.AddScoped<CriticalAlertStreamService>();
 
 var app = builder.Build();
 

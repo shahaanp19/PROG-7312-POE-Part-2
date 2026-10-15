@@ -1,4 +1,5 @@
-﻿using System;
+﻿
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Extensions.Logging;
@@ -10,23 +11,30 @@ public sealed class CommandStateService
     private readonly object _sync = new();
     private readonly ILogger<CommandStateService>? _logger;
 
-    private readonly Queue<CommandRecord> _queue = new();
-    private readonly List<CommandRecord> _history = new();
-    private readonly Stack<Guid> _undoStack = new();
-
+    private readonly Queue<Guid> _fifoQueue = new();
     private readonly PriorityQueue<CommandRecord, (int Rank, long Sequence)>
         _priorityQueue = new();
+    private readonly Stack<Guid> _undoStack = new();
 
+    private readonly Dictionary<Guid, CommandRecord> _recordsById = new();
     private readonly Dictionary<string, List<CommandRecord>> _commandsByDevice =
         new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly List<CommandRecord> _history = new();
+    private readonly List<CommandAuditEntry> _auditLog = new();
+
+    private readonly HashSet<Guid> _pendingIds = new();
     private readonly HashSet<string> _activeErrors =
         new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly List<CommandAuditEntry> _auditLog = new();
-
     private long _prioritySequence;
     private long _auditSequence;
+
+    private const int StaleEntryCompactionThreshold = 64;
+
+    private int _staleFifoEntries;
+    private int _stalePriorityEntries;
+    private int _staleUndoEntries;
 
     public CommandStateService(
         ILogger<CommandStateService>? logger = null)
@@ -41,7 +49,12 @@ public sealed class CommandStateService
         get
         {
             lock (_sync)
-                return _queue.ToArray();
+            {
+                return _fifoQueue
+                    .Where(_pendingIds.Contains)
+                    .Select(id => _recordsById[id])
+                    .ToArray();
+            }
         }
     }
 
@@ -70,8 +83,7 @@ public sealed class CommandStateService
             lock (_sync)
             {
                 return _auditLog
-                    .OrderByDescending(entry => entry.Timestamp)
-                    .ThenByDescending(entry => entry.Sequence)
+                    .OrderByDescending(entry => entry.Sequence)
                     .ToArray();
             }
         }
@@ -82,7 +94,7 @@ public sealed class CommandStateService
         get
         {
             lock (_sync)
-                return _queue.Count;
+                return _pendingIds.Count;
         }
     }
 
@@ -109,17 +121,19 @@ public sealed class CommandStateService
         get
         {
             lock (_sync)
-                return _queue.Count(command =>
-                    command.Status == "Queued" &&
-                    command.Priority == "Critical");
+            {
+                return _pendingIds.Count(id =>
+                    _recordsById.TryGetValue(id, out var record) &&
+                    record.Priority == "Critical");
+            }
         }
     }
 
     public CommandRecord Enqueue(
         string deviceId,
         string command,
-        string? priority,
-        string? parameters)
+        string? priority = "Normal",
+        string? parameters = null)
     {
         if (string.IsNullOrWhiteSpace(deviceId))
             throw new ArgumentException(
@@ -129,133 +143,167 @@ public sealed class CommandStateService
             throw new ArgumentException(
                 "A command is required.", nameof(command));
 
+        var normalizedDeviceId = deviceId.Trim();
+        var normalizedCommand = command.Trim();
+        var normalizedPriority = NormalizePriority(priority);
+        var normalizedParameters = parameters?.Trim() ?? string.Empty;
+
         var record = new CommandRecord
         {
-            DeviceId = deviceId.Trim(),
-            Command = command.Trim(),
-            Priority = NormalizePriority(priority),
-            Parameters = parameters?.Trim() ?? string.Empty,
+            DeviceId = normalizedDeviceId,
+            Command = normalizedCommand,
+            Priority = normalizedPriority,
+            Parameters = normalizedParameters,
             CreatedAt = DateTimeOffset.UtcNow,
             Status = "Queued",
-            Details = string.IsNullOrWhiteSpace(parameters)
+            Details = string.IsNullOrEmpty(normalizedParameters)
                 ? "Submitted to the local command queue."
-                : $"Parameters: {parameters.Trim()}"
+                : $"Parameters: {normalizedParameters}"
         };
 
         lock (_sync)
         {
-            _queue.Enqueue(record);
+            _recordsById.Add(record.Id, record);
+            _pendingIds.Add(record.Id);
+
+            _fifoQueue.Enqueue(record.Id);
 
             _priorityQueue.Enqueue(
                 record,
                 (GetPriorityRank(record.Priority), _prioritySequence++));
 
-            _history.Insert(0, record);
             _undoStack.Push(record.Id);
+            _history.Insert(0, record);
 
             if (!_commandsByDevice.TryGetValue(
-                record.DeviceId, out var commands))
+                    normalizedDeviceId,
+                    out var deviceCommands))
             {
-                commands = new List<CommandRecord>();
-                _commandsByDevice.Add(record.DeviceId, commands);
+                deviceCommands = new List<CommandRecord>();
+                _commandsByDevice.Add(normalizedDeviceId, deviceCommands);
             }
 
-            commands.Add(record);
+            deviceCommands.Add(record);
 
             AddAuditEntry(
                 record,
                 "Queued",
-                $"Command '{record.Command}' queued with {record.Priority} priority.");
+                $"Command queued with {record.Priority} priority.");
         }
 
         NotifyStateChanged();
         return record;
     }
 
+    public CommandRecord EnqueueCriticalAlert(
+        string deviceId,
+        string alertCommand,
+        string? parameters = null)
+    {
+        return Enqueue(deviceId, alertCommand, "Critical", parameters);
+    }
+
+    /// <summary>
+    /// Processes the highest-priority pending command.
+    /// Priority order: Critical, High, Normal.
+    /// Commands of equal priority are processed FIFO.
+    /// </summary>
     public CommandRecord? ProcessNext()
     {
-        CommandRecord? record;
-
-        lock (_sync)
-        {
-            if (!_queue.TryDequeue(out record))
-                return null;
-
-            if (record.Status != "Queued")
-                return null;
-
-            MarkProcessed(record, "FIFO");
-            RemoveFromUndoStack(record.Id);
-        }
-
-        NotifyStateChanged();
-        return record;
+        return ProcessHighestPriority();
     }
 
     public CommandRecord? ProcessHighestPriority()
     {
-        CommandRecord? record = null;
+        CommandRecord? processed;
 
         lock (_sync)
         {
-            while (_priorityQueue.TryDequeue(
-                out var candidate, out _))
-            {
-                if (candidate.Status != "Queued")
-                    continue;
+            processed = TakeNextPriorityCommand();
 
-                record = candidate;
-                break;
-            }
-
-            if (record is null)
+            if (processed is null)
                 return null;
 
-            RemoveFromFifoQueue(record.Id);
-            RemoveFromUndoStack(record.Id);
-            MarkProcessed(record, "priority scheduling");
+            InvalidateOtherEntries(processed.Id, "priority");
+
+            MarkProcessed(processed, "priority scheduling");
+            CompactStaleCollections();
         }
 
         NotifyStateChanged();
-        return record;
+        return processed;
+    }
+
+    /// <summary>
+    /// Explicit FIFO processing, independent of command priority.
+    /// Use ProcessNext() for priority-aware scheduling.
+    /// </summary>
+    public CommandRecord? ProcessNextFifo()
+    {
+        CommandRecord? processed;
+
+        lock (_sync)
+        {
+            processed = TakeNextFifoCommand();
+
+            if (processed is null)
+                return null;
+
+            InvalidateOtherEntries(processed.Id, "fifo");
+
+            MarkProcessed(processed, "FIFO");
+            CompactStaleCollections();
+        }
+
+        NotifyStateChanged();
+        return processed;
     }
 
     public CommandRecord? UndoLast()
     {
-        CommandRecord? record = null;
+        CommandRecord? undone = null;
 
         lock (_sync)
         {
             while (_undoStack.Count > 0)
             {
                 var id = _undoStack.Pop();
-                var candidate = _history.FirstOrDefault(
-                    item => item.Id == id);
 
-                if (candidate is null || candidate.Status != "Queued")
+                if (!_pendingIds.Remove(id))
+                {
+                    DecrementIfPositive(ref _staleUndoEntries);
                     continue;
+                }
 
-                record = candidate;
+                if (!_recordsById.TryGetValue(id, out undone))
+                {
+                    undone = null;
+                    continue;
+                }
+
+                _staleFifoEntries++;
+                _stalePriorityEntries++;
+
+                undone.Status = "Undone";
+                undone.Details =
+                    "Removed from the pending queue. " +
+                    "No device action was reversed.";
+
+                AddAuditEntry(
+                    undone,
+                    "Undone",
+                    "Most recently submitted pending command undone.");
+
                 break;
             }
 
-            if (record is null)
-                return null;
-
-            RemoveFromFifoQueue(record.Id);
-
-            record.Status = "Undone";
-            record.Details =
-                "Removed from the pending queue. No device action was reversed.";
-
-            AddAuditEntry(
-                record,
-                "Undone",
-                "Pending command removed by undo.");
+            CompactStaleCollections();
         }
 
-        NotifyStateChanged();
-        return record;
+        if (undone is not null)
+            NotifyStateChanged();
+
+        return undone;
     }
 
     public int ClearQueue()
@@ -264,14 +312,15 @@ public sealed class CommandStateService
 
         lock (_sync)
         {
-            var pending = _queue.ToArray();
+            var pending = _pendingIds
+                .Where(_recordsById.ContainsKey)
+                .Select(id => _recordsById[id])
+                .ToArray();
+
             cleared = pending.Length;
 
             foreach (var record in pending)
             {
-                if (record.Status != "Queued")
-                    continue;
-
                 record.Status = "Cleared";
                 record.Details =
                     "Removed from the queue before processing.";
@@ -282,9 +331,14 @@ public sealed class CommandStateService
                     "Pending command removed during queue clearance.");
             }
 
-            _queue.Clear();
+            _pendingIds.Clear();
+            _fifoQueue.Clear();
             _priorityQueue.Clear();
             _undoStack.Clear();
+
+            _staleFifoEntries = 0;
+            _stalePriorityEntries = 0;
+            _staleUndoEntries = 0;
         }
 
         if (cleared > 0)
@@ -302,10 +356,19 @@ public sealed class CommandStateService
         lock (_sync)
         {
             return _commandsByDevice.TryGetValue(
-                deviceId.Trim(), out var commands)
+                    deviceId.Trim(),
+                    out var commands)
                 ? commands.ToArray()
                 : Array.Empty<CommandRecord>();
         }
+    }
+
+    public bool TryGetCommand(
+        Guid commandId,
+        out CommandRecord? record)
+    {
+        lock (_sync)
+            return _recordsById.TryGetValue(commandId, out record);
     }
 
     public void RecordActiveError(string? errorKey)
@@ -362,30 +425,64 @@ public sealed class CommandStateService
         return removed;
     }
 
-    public bool TryGetCommand(
-        Guid commandId,
-        out CommandRecord? record)
-    {
-        lock (_sync)
-        {
-            record = _history.FirstOrDefault(
-                command => command.Id == commandId);
-
-            return record is not null;
-        }
-    }
-
     public void ClearAuditLog()
     {
+        bool changed;
+
         lock (_sync)
         {
-            if (_auditLog.Count == 0)
-                return;
-
+            changed = _auditLog.Count > 0;
             _auditLog.Clear();
         }
 
-        NotifyStateChanged();
+        if (changed)
+            NotifyStateChanged();
+    }
+
+    private CommandRecord? TakeNextPriorityCommand()
+    {
+        while (_priorityQueue.TryDequeue(out var candidate, out _))
+        {
+            if (!_pendingIds.Remove(candidate.Id))
+            {
+                DecrementIfPositive(ref _stalePriorityEntries);
+                continue;
+            }
+
+            return candidate;
+        }
+
+        return null;
+    }
+
+    private CommandRecord? TakeNextFifoCommand()
+    {
+        while (_fifoQueue.Count > 0)
+        {
+            var id = _fifoQueue.Dequeue();
+
+            if (!_pendingIds.Remove(id))
+            {
+                DecrementIfPositive(ref _staleFifoEntries);
+                continue;
+            }
+
+            return _recordsById.TryGetValue(id, out var record)
+                ? record
+                : null;
+        }
+
+        return null;
+    }
+
+    private void InvalidateOtherEntries(Guid commandId, string mode)
+    {
+        if (mode == "priority")
+            _staleFifoEntries++;
+        else
+            _stalePriorityEntries++;
+
+        _staleUndoEntries++;
     }
 
     private void MarkProcessed(
@@ -403,32 +500,56 @@ public sealed class CommandStateService
             $"Command processed locally using {processingMode}.");
     }
 
-    private void RemoveFromFifoQueue(Guid id)
+    private void CompactStaleCollections()
     {
-        var remaining = _queue
-            .Where(command => command.Id != id)
-            .ToArray();
+        var threshold = Math.Max(
+            StaleEntryCompactionThreshold,
+            _pendingIds.Count);
 
-        _queue.Clear();
+        if (_staleFifoEntries > threshold)
+        {
+            var activeIds = _fifoQueue
+                .Where(_pendingIds.Contains)
+                .ToArray();
 
-        foreach (var command in remaining)
-            _queue.Enqueue(command);
-    }
+            _fifoQueue.Clear();
 
-    private void RemoveFromUndoStack(Guid id)
-    {
-        if (_undoStack.Count == 0)
-            return;
+            foreach (var id in activeIds)
+                _fifoQueue.Enqueue(id);
 
-        var remaining = _undoStack
-            .Where(commandId => commandId != id)
-            .Reverse()
-            .ToArray();
+            _staleFifoEntries = 0;
+        }
 
-        _undoStack.Clear();
+        if (_stalePriorityEntries > threshold)
+        {
+            var activeEntries = _priorityQueue.UnorderedItems
+                .Where(item => _pendingIds.Contains(item.Element.Id))
+                .Select(item => (
+                    Record: item.Element,
+                    Priority: item.Priority))
+                .ToArray();
 
-        foreach (var commandId in remaining)
-            _undoStack.Push(commandId);
+            _priorityQueue.Clear();
+
+            foreach (var item in activeEntries)
+                _priorityQueue.Enqueue(item.Record, item.Priority);
+
+            _stalePriorityEntries = 0;
+        }
+
+        if (_staleUndoEntries > threshold)
+        {
+            var activeIds = _undoStack
+                .Where(_pendingIds.Contains)
+                .ToArray();
+
+            _undoStack.Clear();
+
+            for (var i = activeIds.Length - 1; i >= 0; i--)
+                _undoStack.Push(activeIds[i]);
+
+            _staleUndoEntries = 0;
+        }
     }
 
     private void AddAuditEntry(
@@ -466,6 +587,12 @@ public sealed class CommandStateService
             _ => 2
         };
 
+    private static void DecrementIfPositive(ref int count)
+    {
+        if (count > 0)
+            count--;
+    }
+
     private void NotifyStateChanged()
     {
         var handlers = StateChanged;
@@ -495,23 +622,38 @@ public sealed class CommandStateService
 public sealed class CommandRecord
 {
     public Guid Id { get; init; } = Guid.NewGuid();
+
     public string DeviceId { get; init; } = string.Empty;
+
     public string Command { get; init; } = string.Empty;
+
     public string Priority { get; init; } = "Normal";
+
     public string Parameters { get; init; } = string.Empty;
-    public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    public DateTimeOffset CreatedAt { get; init; } =
+        DateTimeOffset.UtcNow;
+
     public string Status { get; set; } = "Queued";
+
     public string Details { get; set; } = string.Empty;
 }
 
 public sealed class CommandAuditEntry
 {
     public long Sequence { get; init; }
+
     public DateTimeOffset Timestamp { get; init; }
+
     public Guid? CommandId { get; init; }
+
     public string DeviceId { get; init; } = string.Empty;
+
     public string Command { get; init; } = string.Empty;
+
     public string Action { get; init; } = string.Empty;
+
     public string Details { get; init; } = string.Empty;
+
     public string? ErrorKey { get; init; }
 }

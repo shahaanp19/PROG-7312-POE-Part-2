@@ -1,0 +1,305 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading.Tasks;
+
+namespace SmartX.Web.Services;
+
+public sealed record DiagnosticResult(
+    string Name,
+    bool Passed,
+    string Details,
+    long ElapsedMilliseconds);
+
+public static class CommandCollectionDiagnostics
+{
+    public static IReadOnlyList<DiagnosticResult> RunAll()
+    {
+        return new List<DiagnosticResult>
+        {
+            Run("Priority ordering", TestPriorityOrdering),
+            Run("FIFO within equal priority", TestEqualPriorityFifo),
+            Run("Priority-aware ProcessNext", TestProcessNextPriority),
+            Run("Undo newest pending command", TestUndo),
+            Run("Undo skips processed commands", TestUndoSkipsProcessed),
+            Run("Critical alert ingestion", TestCriticalAlertIngestion),
+            Run("Queue clearing preserves history", TestClearQueue),
+            Run("Device command index", TestDeviceIndex),
+            Run("Audit trail", TestAuditTrail),
+            Run("Repeated collection operations", TestRepeatedOperations),
+            Run("Concurrent command submissions", TestConcurrentSubmissions),
+            Run("Concurrent critical alert ingestion", TestConcurrentAlerts)
+        };
+    }
+
+    private static DiagnosticResult Run(string name, Action test)
+    {
+        var timer = Stopwatch.StartNew();
+
+        try
+        {
+            test();
+            timer.Stop();
+            return new DiagnosticResult(name, true, "Passed", timer.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            timer.Stop();
+            return new DiagnosticResult(name, false, ex.Message, timer.ElapsedMilliseconds);
+        }
+    }
+
+    private static void Assert(bool condition, string message)
+    {
+        if (!condition)
+            throw new InvalidOperationException(message);
+    }
+
+    private static CommandStateService CreateService() => new();
+
+    private static void TestPriorityOrdering()
+    {
+        var service = CreateService();
+
+        service.Enqueue("D1", "Normal", "Normal");
+        service.Enqueue("D2", "High", "High");
+        service.EnqueueCriticalAlert("D3", "Critical");
+
+        Assert(service.ProcessNext()?.Priority == "Critical",
+            "Critical command was not processed first.");
+        Assert(service.ProcessNext()?.Priority == "High",
+            "High-priority command was not processed second.");
+        Assert(service.ProcessNext()?.Priority == "Normal",
+            "Normal command was not processed last.");
+        Assert(service.QueueCount == 0, "Queue should be empty.");
+    }
+
+    private static void TestEqualPriorityFifo()
+    {
+        var service = CreateService();
+
+        service.Enqueue("D1", "First", "High");
+        service.Enqueue("D2", "Second", "High");
+        service.Enqueue("D3", "Third", "High");
+
+        Assert(service.ProcessNext()?.Command == "First",
+            "First equal-priority command was not processed first.");
+        Assert(service.ProcessNext()?.Command == "Second",
+            "Second equal-priority command was not processed second.");
+        Assert(service.ProcessNext()?.Command == "Third",
+            "Third equal-priority command was not processed third.");
+    }
+
+    private static void TestProcessNextPriority()
+    {
+        var service = CreateService();
+
+        service.Enqueue("D1", "Ordinary", "Normal");
+        service.EnqueueCriticalAlert("D2", "Emergency");
+
+        Assert(service.ProcessNext()?.Command == "Emergency",
+            "ProcessNext did not select the critical alert.");
+    }
+
+    private static void TestUndo()
+    {
+        var service = CreateService();
+
+        service.Enqueue("D1", "First", "Normal");
+        service.Enqueue("D2", "Second", "Normal");
+        service.Enqueue("D3", "Third", "Normal");
+
+        Assert(service.UndoLast()?.Command == "Third",
+            "Undo did not remove the newest command.");
+        Assert(service.QueueCount == 2,
+            "Undo left an incorrect pending count.");
+        Assert(service.ProcessNext()?.Command == "First",
+            "Undo corrupted FIFO order.");
+        Assert(service.ProcessNext()?.Command == "Second",
+            "The remaining command was not preserved.");
+    }
+
+    private static void TestUndoSkipsProcessed()
+    {
+        var service = CreateService();
+
+        service.Enqueue("D1", "First", "Normal");
+        service.Enqueue("D2", "Second", "Normal");
+
+        Assert(service.ProcessNext()?.Command == "First",
+            "Expected first command to be processed.");
+        Assert(service.UndoLast()?.Command == "Second",
+            "Undo should skip the already processed command.");
+        Assert(service.UndoLast() is null,
+            "Undo should return null when nothing is pending.");
+    }
+
+    private static void TestCriticalAlertIngestion()
+    {
+        var service = CreateService();
+
+        var record = service.EnqueueCriticalAlert(
+            "Sensor-001", "EmergencyStop", "temperature=95");
+
+        Assert(record.Priority == "Critical",
+            "Alert was not assigned Critical priority.");
+        Assert(record.Status == "Queued", "Alert should be queued.");
+        Assert(service.CriticalQueueCount == 1,
+            "Critical queue count is incorrect.");
+        Assert(service.GetCommandsForDevice("Sensor-001").Count == 1,
+            "Alert was not indexed by device.");
+        Assert(service.ProcessNext()?.Id == record.Id,
+            "Critical alert was not selected for processing.");
+    }
+
+    private static void TestClearQueue()
+    {
+        var service = CreateService();
+
+        service.Enqueue("D1", "One", "Normal");
+        service.Enqueue("D2", "Two", "High");
+        service.EnqueueCriticalAlert("D3", "Three");
+
+        var cleared = service.ClearQueue();
+
+        Assert(cleared == 3, "ClearQueue returned an incorrect count.");
+        Assert(service.QueueCount == 0, "Queue was not cleared.");
+        Assert(service.HistoryCount == 3, "History was not preserved.");
+        Assert(service.History.All(record => record.Status == "Cleared"),
+            "Cleared records have inconsistent statuses.");
+        Assert(service.ProcessNext() is null,
+            "A command remained processable after clearing.");
+    }
+
+    private static void TestDeviceIndex()
+    {
+        var service = CreateService();
+
+        service.Enqueue("Sensor-001", "Read", "Normal");
+        service.Enqueue("Sensor-002", "Reset", "High");
+        service.Enqueue("Sensor-001", "Calibrate", "High");
+
+        var records = service.GetCommandsForDevice("sensor-001");
+
+        Assert(records.Count == 2,
+            "Device index returned an incorrect number of commands.");
+        Assert(records.All(record => record.DeviceId.Equals(
+                "Sensor-001", StringComparison.OrdinalIgnoreCase)),
+            "Device index returned a command for another device.");
+    }
+
+    private static void TestAuditTrail()
+    {
+        var service = CreateService();
+        var record = service.Enqueue("D1", "Inspect", "Normal");
+
+        service.ProcessNext();
+
+        var entries = service.AuditLog
+            .Where(entry => entry.CommandId == record.Id)
+            .ToArray();
+
+        Assert(entries.Length >= 2,
+            "Expected queue and processing audit entries.");
+        Assert(entries[0].Sequence > entries[^1].Sequence,
+            "Audit trail is not ordered newest first.");
+    }
+
+    private static void TestRepeatedOperations()
+    {
+        var service = CreateService();
+
+        for (var i = 0; i < 250; i++)
+        {
+            service.Enqueue(
+                $"D{i % 7}",
+                $"Command-{i}",
+                i % 3 == 0 ? "Critical" :
+                i % 3 == 1 ? "High" : "Normal");
+        }
+
+        for (var i = 0; i < 75; i++)
+            Assert(service.ProcessNext() is not null,
+                "Expected a command to be processed.");
+
+        for (var i = 0; i < 25; i++)
+            Assert(service.UndoLast() is not null,
+                "Expected a pending command to be undone.");
+
+        Assert(service.QueueCount == service.Queue.Count,
+            "Pending count differs from queue contents.");
+
+        var pendingIds = service.Queue.Select(record => record.Id).ToHashSet();
+
+        Assert(pendingIds.Count == service.QueueCount,
+            "Queue contains duplicate pending command IDs.");
+        Assert(service.Queue.All(record => record.Status == "Queued"),
+            "Queue contains a record with a non-pending status.");
+    }
+
+    private static void TestConcurrentSubmissions()
+    {
+        var service = CreateService();
+        const int workers = 8;
+        const int commandsPerWorker = 100;
+
+        Parallel.For(0, workers, worker =>
+        {
+            for (var i = 0; i < commandsPerWorker; i++)
+            {
+                service.Enqueue(
+                    $"Device-{worker}",
+                    $"Command-{worker}-{i}",
+                    i % 2 == 0 ? "High" : "Normal");
+            }
+        });
+
+        var expected = workers * commandsPerWorker;
+
+        Assert(service.QueueCount == expected,
+            "Concurrent submissions lost or duplicated pending commands.");
+        Assert(service.HistoryCount == expected,
+            "Concurrent submissions corrupted history.");
+        Assert(service.Queue.Select(record => record.Id).Distinct().Count()
+                == expected,
+            "Pending queue contains duplicate command IDs.");
+    }
+
+    private static void TestConcurrentAlerts()
+    {
+        var service = CreateService();
+        const int workers = 8;
+        const int alertsPerWorker = 50;
+
+        Parallel.For(0, workers, worker =>
+        {
+            for (var i = 0; i < alertsPerWorker; i++)
+            {
+                service.EnqueueCriticalAlert(
+                    $"Sensor-{worker}",
+                    $"Alert-{worker}-{i}");
+            }
+        });
+
+        var expected = workers * alertsPerWorker;
+
+        Assert(service.QueueCount == expected,
+            "Concurrent alerts were lost or duplicated.");
+        Assert(service.CriticalQueueCount == expected,
+            "Not every alert received Critical priority.");
+
+        for (var i = 0; i < expected; i++)
+        {
+            var record = service.ProcessNext();
+
+            Assert(record is not null,
+                "A critical alert could not be processed.");
+            Assert(record.Priority == "Critical",
+                "A non-critical command was selected ahead of a critical alert.");
+        }
+
+        Assert(service.QueueCount == 0,
+            "Pending alerts remain after processing.");
+    }
+}

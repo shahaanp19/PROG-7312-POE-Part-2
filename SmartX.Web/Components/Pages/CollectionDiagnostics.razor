@@ -1,0 +1,502 @@
+﻿@page "/collection-diagnostics"
+@using System
+@using System.Linq
+@using SmartX.Web.Services
+
+<PageTitle>Collection Diagnostics | Smart-X</PageTitle>
+
+<div class="diagnostics-page">
+    <header class="page-heading">
+        <div>
+            <span class="eyebrow">PART 2 / ADVANCED COLLECTIONS</span>
+            <h1>Stack &amp; Queue Diagnostics</h1>
+            <p>Validate FIFO processing, priority scheduling, LIFO undo, critical-alert ingestion, and collection consistency.</p>
+        </div>
+        <a class="back-link" href="/commands">← Command Stream</a>
+    </header>
+
+    <section class="summary-grid">
+        <article class="summary-card">
+            <span>Tests Executed</span>
+            <strong>@_results.Count</strong>
+        </article>
+        <article class="summary-card">
+            <span>Passed</span>
+            <strong>@_results.Count(result => result.Passed)</strong>
+        </article>
+        <article class="summary-card">
+            <span>Failed</span>
+            <strong>@_results.Count(result => !result.Passed)</strong>
+        </article>
+        <article class="summary-card">
+            <span>Overall Status</span>
+            <strong class="@(_hasRun ? (_allPassed ? "passed" : "failed") : "")">
+                @(_hasRun ? (_allPassed ? "PASS" : "FAIL") : "NOT RUN")
+            </strong>
+        </article>
+    </section>
+
+    <section class="panel">
+        <div class="panel-heading">
+            <h2>Automated Collection Tests</h2>
+            <p>Each run creates an isolated CommandStateService instance to avoid changing your live command queue.</p>
+        </div>
+
+        <div class="actions">
+            <button type="button"
+                    class="btn btn-primary"
+                    @onclick="RunDiagnostics">
+                Run All Diagnostics
+            </button>
+            <button type="button"
+                    class="btn btn-secondary"
+                    @onclick="ClearResults"
+                    disabled="@(!_hasRun)">
+                Clear Results
+            </button>
+        </div>
+
+        @if (!_hasRun)
+        {
+            <div class="empty-state">
+                <strong>Diagnostics have not been run</strong>
+                <p>Select Run All Diagnostics to execute the collection checks.</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Test</th>
+                            <th>Result</th>
+                            <th>Verification</th>
+                            <th>Elapsed (ms)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var result in _results)
+                        {
+                            <tr @key="result.Name">
+                                <td class="test-name">@result.Name</td>
+                                <td>
+                                    <span class="result-badge @(result.Passed ? "result-pass" : "result-fail")">
+                                        @(result.Passed ? "PASS" : "FAIL")
+                                    </span>
+                                </td>
+                                <td class="details">@result.Details</td>
+                                <td>@result.ElapsedMilliseconds</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="result-summary @(_allPassed ? "summary-pass" : "summary-fail")"
+                 role="status">
+                @if (_allPassed)
+                {
+                    <strong>All collection diagnostics passed.</strong>
+                    <p>The tested queue, priority, undo, alert-ingestion, and consistency operations behaved as expected.</p>
+                }
+                else
+                {
+                    <strong>One or more diagnostics failed.</strong>
+                    <p>Inspect the failed test and correct the underlying collection behavior.</p>
+                }
+            </div>
+        }
+    </section>
+
+    <section class="panel">
+        <div class="panel-heading">
+            <h2>Assessment Evidence</h2>
+            <p>Data structures and behaviors covered by these diagnostics.</p>
+        </div>
+
+        <ul class="evidence-list">
+            <li>
+                <strong>FIFO Queue</strong>
+                <span>Verifies submission order during standard processing.</span>
+            </li>
+            <li>
+                <strong>Priority Queue</strong>
+                <span>Verifies Critical → High → Normal ordering and stable ordering for equal priorities.</span>
+            </li>
+            <li>
+                <strong>LIFO Stack</strong>
+                <span>Verifies that undo removes the newest pending command.</span>
+            </li>
+            <li>
+                <strong>Critical Alert Ingestion</strong>
+                <span>Verifies that critical alerts enter the managed collections and audit trail.</span>
+            </li>
+            <li>
+                <strong>Collection Consistency</strong>
+                <span>Verifies that pending commands, history, and statuses remain consistent after mixed operations.</span>
+            </li>
+        </ul>
+    </section>
+</div>
+
+<style>
+    .diagnostics-page {
+        max-width: 1440px;
+        margin: 0 auto;
+        color: #19243a;
+    }
+
+    .page-heading {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 24px;
+    }
+
+    .eyebrow {
+        color: #3978ed;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 1.5px;
+    }
+
+    .page-heading h1 {
+        margin: 9px 0 7px;
+        font-size: clamp(25px, 3vw, 32px);
+        font-weight: 800;
+    }
+
+    .page-heading p {
+        max-width: 760px;
+        margin: 0;
+        color: #718096;
+        font-size: 13px;
+        line-height: 1.7;
+    }
+
+    .back-link {
+        display: inline-block;
+        padding: 10px 13px;
+        border: 1px solid #dce4ef;
+        border-radius: 7px;
+        color: #35445d;
+        background: white;
+        text-decoration: none;
+        font-size: 12px;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
+    }
+
+    .summary-card,
+    .panel {
+        min-width: 0;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        background: white;
+        box-shadow: 0 2px 7px rgb(16 28 53 / 3%);
+    }
+
+    .summary-card {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 19px 20px;
+    }
+
+        .summary-card span {
+            color: #718096;
+            font-size: 12px;
+        }
+
+        .summary-card strong {
+            font-size: 27px;
+            font-weight: 800;
+        }
+
+    .passed {
+        color: #176b4a;
+    }
+
+    .failed {
+        color: #b42318;
+    }
+
+    .panel {
+        margin-bottom: 20px;
+        overflow: hidden;
+    }
+
+    .panel-heading {
+        padding: 19px 22px;
+        border-bottom: 1px solid #edf0f5;
+    }
+
+        .panel-heading h2 {
+            margin: 0 0 5px;
+            font-size: 16px;
+            font-weight: 800;
+        }
+
+        .panel-heading p {
+            margin: 0;
+            color: #718096;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+    .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 18px 22px;
+    }
+
+    .btn {
+        min-height: 39px;
+        padding: 10px 14px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 750;
+        cursor: pointer;
+    }
+
+        .btn:disabled {
+            cursor: not-allowed;
+            opacity: .5;
+        }
+
+    .btn-primary {
+        color: white;
+        background: #285fca;
+    }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #1f4fae;
+        }
+
+    .btn-secondary {
+        border-color: #dce4ef;
+        color: #35445d;
+        background: white;
+    }
+
+    .table-wrap {
+        width: 100%;
+        overflow-x: auto;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+    }
+
+    thead {
+        background: #f8fafd;
+    }
+
+    th {
+        padding: 12px 17px;
+        color: #718096;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: .4px;
+        text-transform: uppercase;
+    }
+
+    td {
+        padding: 15px 17px;
+        border-top: 1px solid #edf0f5;
+        color: #4c5b70;
+        font-size: 12px;
+        vertical-align: top;
+    }
+
+    tbody tr:hover {
+        background: #fafcff;
+    }
+
+    .test-name {
+        color: #243956;
+        font-weight: 750;
+        white-space: nowrap;
+    }
+
+    .details {
+        min-width: 240px;
+        line-height: 1.6;
+    }
+
+    .result-badge {
+        display: inline-block;
+        padding: 5px 8px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 800;
+    }
+
+    .result-pass {
+        color: #176b4a;
+        background: #e5f7ed;
+    }
+
+    .result-fail {
+        color: #b42318;
+        background: #ffebe9;
+    }
+
+    .empty-state {
+        padding: 36px 18px;
+        text-align: center;
+    }
+
+        .empty-state strong {
+            font-size: 13px;
+        }
+
+        .empty-state p {
+            margin: 7px 0 0;
+            color: #8290a4;
+            font-size: 12px;
+        }
+
+    .result-summary {
+        margin: 0 22px 22px;
+        padding: 16px;
+        border: 1px solid #e2e8f0;
+        border-radius: 7px;
+    }
+
+        .result-summary strong {
+            font-size: 13px;
+        }
+
+        .result-summary p {
+            margin: 6px 0 0;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+    .summary-pass {
+        background: #f3fbf6;
+        border-color: #ccebd8;
+        color: #176b4a;
+    }
+
+    .summary-fail {
+        background: #fff5f4;
+        border-color: #f3ceca;
+        color: #b42318;
+    }
+
+    .evidence-list {
+        display: grid;
+        gap: 0;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+    }
+
+        .evidence-list li {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            padding: 16px 22px;
+            border-bottom: 1px solid #edf0f5;
+        }
+
+            .evidence-list li:last-child {
+                border-bottom: 0;
+            }
+
+        .evidence-list strong {
+            color: #243956;
+            font-size: 12px;
+        }
+
+        .evidence-list span {
+            color: #718096;
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+    @@media (max-width: 850px) {
+        .summary-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @@media (max-width: 600px) {
+        .page-heading {
+            flex-direction: column;
+        }
+
+        .summary-grid {
+            gap: 10px;
+        }
+
+        .summary-card {
+            padding: 15px;
+        }
+
+        .panel-heading {
+            padding: 16px;
+        }
+
+        .actions {
+            padding: 16px;
+        }
+
+        .result-summary {
+            margin: 0 16px 16px;
+        }
+    }
+</style>
+
+@code {
+    private IReadOnlyList<DiagnosticResult> _results =
+        Array.Empty<DiagnosticResult>();
+
+    private bool _hasRun;
+
+    private bool _allPassed =>
+        _results.Count > 0 &&
+        _results.All(result => result.Passed);
+
+    private void RunDiagnostics()
+    {
+        try
+        {
+            _results = CommandCollectionDiagnostics.RunAll();
+        }
+        catch (Exception ex)
+        {
+            _results = new[]
+            {
+                new DiagnosticResult(
+                    "Diagnostic execution",
+                    false,
+                    $"{ex.GetType().Name}: {ex.Message}",
+                    0)
+            };
+        }
+
+        _hasRun = true;
+    }
+
+    private void ClearResults()
+    {
+        _results = Array.Empty<DiagnosticResult>();
+        _hasRun = false;
+    }
+}
