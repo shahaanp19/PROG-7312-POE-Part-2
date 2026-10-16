@@ -9,8 +9,8 @@
     <header class="page-heading">
         <div>
             <span class="eyebrow">PART 2 / ADVANCED COLLECTIONS</span>
-            <h1>Stack &amp; Queue Diagnostics</h1>
-            <p>Validate FIFO processing, priority scheduling, LIFO undo, critical-alert ingestion, and collection consistency.</p>
+            <h1>Collection &amp; Lookup Diagnostics</h1>
+            <p>Validate dictionary-based device caching, sorted command timelines, priority scheduling, FIFO processing, LIFO undo, and collection consistency.</p>
         </div>
         <a class="back-link" href="/commands">← Command Stream</a>
     </header>
@@ -22,11 +22,11 @@
         </article>
         <article class="summary-card">
             <span>Passed</span>
-            <strong>@_results.Count(result => result.Passed)</strong>
+            <strong class="passed">@_results.Count(result => result.Passed)</strong>
         </article>
         <article class="summary-card">
             <span>Failed</span>
-            <strong>@_results.Count(result => !result.Passed)</strong>
+            <strong class="failed">@_results.Count(result => !result.Passed)</strong>
         </article>
         <article class="summary-card">
             <span>Overall Status</span>
@@ -39,7 +39,7 @@
     <section class="panel">
         <div class="panel-heading">
             <h2>Automated Collection Tests</h2>
-            <p>Each run creates an isolated CommandStateService instance to avoid changing your live command queue.</p>
+            <p>Tests execute against isolated CommandStateService instances without modifying the live command queue.</p>
         </div>
 
         <div class="actions">
@@ -60,7 +60,14 @@
         {
             <div class="empty-state">
                 <strong>Diagnostics have not been run</strong>
-                <p>Select Run All Diagnostics to execute the collection checks.</p>
+                <p>Run the automated checks to verify collection behavior and indexed lookup operations.</p>
+            </div>
+        }
+        else if (_results.Count == 0)
+        {
+            <div class="empty-state">
+                <strong>No diagnostic results returned</strong>
+                <p>Run the diagnostics again to produce results.</p>
             </div>
         }
         else
@@ -71,7 +78,7 @@
                         <tr>
                             <th>Test</th>
                             <th>Result</th>
-                            <th>Verification</th>
+                            <th>Verification Details</th>
                             <th>Elapsed (ms)</th>
                         </tr>
                     </thead>
@@ -86,7 +93,7 @@
                                     </span>
                                 </td>
                                 <td class="details">@result.Details</td>
-                                <td>@result.ElapsedMilliseconds</td>
+                                <td class="elapsed">@result.ElapsedMilliseconds</td>
                             </tr>
                         }
                     </tbody>
@@ -98,12 +105,12 @@
                 @if (_allPassed)
                 {
                     <strong>All collection diagnostics passed.</strong>
-                    <p>The tested queue, priority, undo, alert-ingestion, and consistency operations behaved as expected.</p>
+                    <p>Every executed check passed. Review individual results for lookup, timeline, ordering, and workload evidence.</p>
                 }
                 else
                 {
                     <strong>One or more diagnostics failed.</strong>
-                    <p>Inspect the failed test and correct the underlying collection behavior.</p>
+                    <p>Inspect the failed test details and correct the underlying collection behavior.</p>
                 }
             </div>
         }
@@ -111,33 +118,90 @@
 
     <section class="panel">
         <div class="panel-heading">
-            <h2>Assessment Evidence</h2>
-            <p>Data structures and behaviors covered by these diagnostics.</p>
+            <h2>Dictionary &amp; Sorted Timeline Evidence</h2>
+            <p>Collection structures used to reduce lookup and timeline retrieval overhead.</p>
+        </div>
+
+        <div class="evidence-grid">
+            <article class="evidence-card">
+                <span class="evidence-icon">01</span>
+                <h3>Dictionary-Based Device Index</h3>
+                <p>Maps device identifiers to their command records, enabling direct key-based lookup instead of scanning the entire history.</p>
+                <code>Dictionary&lt;string, ...&gt;</code>
+            </article>
+
+            <article class="evidence-card">
+                <span class="evidence-icon">02</span>
+                <h3>Cached Device Results</h3>
+                <p>Maintains device-specific command snapshots and updates them when commands are added, reducing repeated lookup and projection work.</p>
+                <code>GetCommandsForDevice()</code>
+            </article>
+
+            <article class="evidence-card">
+                <span class="evidence-icon">03</span>
+                <h3>Sorted Command Timeline</h3>
+                <p>Maintains chronological command ordering with a deterministic identifier tie-breaker for records with matching timestamps.</p>
+                <code>SortedSet&lt;CommandRecord&gt;</code>
+            </article>
+
+            <article class="evidence-card">
+                <span class="evidence-icon">04</span>
+                <h3>Bounded Timeline Queries</h3>
+                <p>Supports date-range filtering, device filtering, newest-first retrieval, and result limits through the indexed timeline API.</p>
+                <code>GetCommandTimeline()</code>
+            </article>
+
+            <article class="evidence-card">
+                <span class="evidence-icon">05</span>
+                <h3>Sorted Audit Events</h3>
+                <p>Maintains audit entries in chronological order using timestamps and sequence numbers for deterministic ordering.</p>
+                <code>SortedSet&lt;CommandAuditEntry&gt;</code>
+            </article>
+
+            <article class="evidence-card">
+                <span class="evidence-icon">06</span>
+                <h3>Workload Diagnostics</h3>
+                <p>Exercises repeated device lookups and timeline queries over a larger collection to capture execution timings.</p>
+                <code>Indexed lookup workload</code>
+            </article>
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="panel-heading">
+            <h2>Core Collection Verification</h2>
+            <p>Additional data structures supporting command processing.</p>
         </div>
 
         <ul class="evidence-list">
             <li>
                 <strong>FIFO Queue</strong>
-                <span>Verifies submission order during standard processing.</span>
+                <span>Verifies submission order during standard command processing.</span>
             </li>
             <li>
                 <strong>Priority Queue</strong>
-                <span>Verifies Critical → High → Normal ordering and stable ordering for equal priorities.</span>
+                <span>Verifies Critical, High, and Normal scheduling, including ordering within equal priorities.</span>
             </li>
             <li>
                 <strong>LIFO Stack</strong>
-                <span>Verifies that undo removes the newest pending command.</span>
+                <span>Verifies undo behavior for the newest eligible pending command.</span>
             </li>
             <li>
-                <strong>Critical Alert Ingestion</strong>
-                <span>Verifies that critical alerts enter the managed collections and audit trail.</span>
+                <strong>Audit Trail</strong>
+                <span>Verifies timestamped records for command submissions, processing, undo, and error changes.</span>
             </li>
             <li>
-                <strong>Collection Consistency</strong>
-                <span>Verifies that pending commands, history, and statuses remain consistent after mixed operations.</span>
+                <strong>Concurrency &amp; Consistency</strong>
+                <span>Exercises repeated and concurrent operations while checking collection consistency.</span>
             </li>
         </ul>
     </section>
+
+    <p class="disclaimer">
+        Execution times depend on the current runtime and workload. These diagnostics provide test evidence,
+        not a guarantee of constant-time performance. Records are maintained in application memory;
+        command processing does not execute physical device operations.
+    </p>
 </div>
 
 <style>
@@ -188,6 +252,11 @@
         font-weight: 700;
         white-space: nowrap;
     }
+
+        .back-link:hover {
+            border-color: #a8c4ff;
+            background: #f7f9ff;
+        }
 
     .summary-grid {
         display: grid;
@@ -337,6 +406,11 @@
         line-height: 1.6;
     }
 
+    .elapsed {
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+    }
+
     .result-badge {
         display: inline-block;
         padding: 5px 8px;
@@ -388,15 +462,69 @@
         }
 
     .summary-pass {
-        background: #f3fbf6;
         border-color: #ccebd8;
         color: #176b4a;
+        background: #f3fbf6;
     }
 
     .summary-fail {
-        background: #fff5f4;
         border-color: #f3ceca;
         color: #b42318;
+        background: #fff5f4;
+    }
+
+    .evidence-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        padding: 18px 22px;
+    }
+
+    .evidence-card {
+        min-width: 0;
+        padding: 17px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        background: #fbfcfe;
+    }
+
+    .evidence-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 29px;
+        height: 29px;
+        margin-bottom: 11px;
+        border-radius: 6px;
+        color: #285fca;
+        background: #eaf1ff;
+        font-size: 10px;
+        font-weight: 800;
+    }
+
+    .evidence-card h3 {
+        margin: 0 0 8px;
+        color: #243956;
+        font-size: 13px;
+        font-weight: 800;
+    }
+
+    .evidence-card p {
+        margin: 0 0 12px;
+        color: #718096;
+        font-size: 12px;
+        line-height: 1.7;
+    }
+
+    .evidence-card code {
+        display: inline-block;
+        max-width: 100%;
+        padding: 6px 8px;
+        border-radius: 4px;
+        color: #35445d;
+        background: #edf1f6;
+        font-size: 11px;
+        overflow-wrap: anywhere;
     }
 
     .evidence-list {
@@ -430,9 +558,20 @@
             line-height: 1.6;
         }
 
+    .disclaimer {
+        margin: 0 0 8px;
+        color: #7c899b;
+        font-size: 11px;
+        line-height: 1.7;
+    }
+
     @@media (max-width: 850px) {
         .summary-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .evidence-grid {
+            grid-template-columns: 1fr;
         }
     }
 
@@ -454,6 +593,10 @@
         }
 
         .actions {
+            padding: 16px;
+        }
+
+        .evidence-grid {
             padding: 16px;
         }
 

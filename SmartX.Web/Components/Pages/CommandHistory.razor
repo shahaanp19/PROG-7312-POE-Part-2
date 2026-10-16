@@ -1,5 +1,6 @@
 ﻿@page "/command-history"
 @using SmartX.Web.Services
+@using System.Globalization
 @implements IDisposable
 @inject CommandStateService CommandState
 
@@ -10,7 +11,7 @@
         <div>
             <span class="eyebrow">PART 2 / COMMAND MANAGEMENT</span>
             <h1>Command History &amp; Audit</h1>
-            <p>Review command lifecycle changes and audit events across the current interactive session.</p>
+            <p>Search command records and inspect chronological audit events.</p>
         </div>
         <a class="back-link" href="/commands">← Command Console</a>
     </header>
@@ -18,15 +19,15 @@
     <section class="stats-grid">
         <article class="stat-card">
             <span>Total Commands</span>
-            <strong>@History.Count</strong>
+            <strong>@CommandState.HistoryCount</strong>
         </article>
         <article class="stat-card">
             <span>Pending</span>
-            <strong>@History.Count(x => x.Status == "Queued")</strong>
+            <strong>@CommandState.QueueCount</strong>
         </article>
         <article class="stat-card">
             <span>Processed</span>
-            <strong>@History.Count(x => x.Status == "Processed locally")</strong>
+            <strong>@ProcessedCount</strong>
         </article>
         <article class="stat-card">
             <span>Audit Events</span>
@@ -37,8 +38,8 @@
     <section class="panel">
         <div class="panel-heading">
             <div>
-                <h2>Command Records</h2>
-                <p>Search by device, command, priority, status, or parameters.</p>
+                <h2>Command Timeline</h2>
+                <p>Filter sorted command records by date, device, status, or search terms.</p>
             </div>
             <span class="count-badge">@FilteredHistory.Count records</span>
         </div>
@@ -49,8 +50,17 @@
                 <input id="historySearch"
                        @bind="_search"
                        @bind:event="oninput"
-                       placeholder="Search commands or devices..." />
+                       placeholder="Search commands, devices, parameters..." />
             </div>
+
+            <div class="filter-field">
+                <label for="deviceFilter">Device ID</label>
+                <input id="deviceFilter"
+                       @bind="_deviceFilter"
+                       @bind:event="oninput"
+                       placeholder="All devices" />
+            </div>
+
             <div class="filter-field">
                 <label for="statusFilter">Status</label>
                 <select id="statusFilter" @bind="_statusFilter">
@@ -61,13 +71,38 @@
                     <option value="Cleared">Cleared</option>
                 </select>
             </div>
+
+            <div class="filter-field">
+                <label for="timelineLimit">Maximum records</label>
+                <select id="timelineLimit" @bind="_timelineLimit">
+                    <option value="50">50 newest</option>
+                    <option value="100">100 newest</option>
+                    <option value="250">250 newest</option>
+                    <option value="500">500 newest</option>
+                    <option value="0">All matching</option>
+                </select>
+            </div>
+
+            <div class="filter-field">
+                <label for="fromDate">From date</label>
+                <input id="fromDate" type="date" @bind="_fromDate" />
+            </div>
+
+            <div class="filter-field">
+                <label for="toDate">To date</label>
+                <input id="toDate" type="date" @bind="_toDate" />
+            </div>
         </div>
 
-        @if (FilteredHistory.Count == 0)
+        @if (!TryGetDateRange(out _, out _, out var dateError))
+        {
+            <div class="validation-message" role="alert">@dateError</div>
+        }
+        else if (FilteredHistory.Count == 0)
         {
             <div class="empty-state">
                 <strong>No matching command records</strong>
-                <p>Try changing the search term or status filter.</p>
+                <p>Change your filters or submit a command from the Command Console.</p>
             </div>
         }
         else
@@ -101,20 +136,24 @@
                                         @record.Status
                                     </span>
                                 </td>
-                                <td class="details">@record.Details</td>
+                                <td class="details" title="@record.Details">@record.Details</td>
                             </tr>
                         }
                     </tbody>
                 </table>
             </div>
         }
+
+        <div class="timeline-footer">
+            Displaying @FilteredHistory.Count of @MatchingHistoryCount matching records.
+        </div>
     </section>
 
     <section class="panel">
         <div class="panel-heading">
             <div>
                 <h2>Audit Trail</h2>
-                <p>Timestamped records of submissions, processing, undo, queue clearing, and error changes.</p>
+                <p>Chronologically indexed command and error events, newest first.</p>
             </div>
             <span class="count-badge">@AuditEntries.Count events</span>
         </div>
@@ -123,7 +162,7 @@
         {
             <div class="empty-state">
                 <strong>No audit events recorded</strong>
-                <p>Audit entries will appear as you manage commands and errors.</p>
+                <p>Events appear as commands and active errors are managed.</p>
             </div>
         }
         else
@@ -149,7 +188,7 @@
                                 <td class="device">@DisplayOrDash(entry.DeviceId)</td>
                                 <td>@DisplayOrDash(entry.Command)</td>
                                 <td>@DisplayOrDash(entry.ErrorKey)</td>
-                                <td class="details">@entry.Details</td>
+                                <td class="details" title="@entry.Details">@entry.Details</td>
                             </tr>
                         }
                     </tbody>
@@ -159,8 +198,8 @@
     </section>
 
     <p class="disclaimer">
-        Records are maintained in memory by the current server-side application state.
-        They are not durable database records, and command processing does not execute physical device operations.
+        Records are maintained in memory for the current application session.
+        Command processing does not execute physical device operations.
     </p>
 </div>
 
@@ -182,8 +221,8 @@
     .panel-heading h2 { margin: 0 0 5px; font-size: 16px; font-weight: 800; }
     .panel-heading p { margin: 0; color: #718096; font-size: 12px; line-height: 1.6; }
     .count-badge { padding: 6px 9px; border-radius: 5px; color: #536b91; background: #f0f4fa; font-size: 10px; font-weight: 750; white-space: nowrap; }
-    .filters { display: grid; grid-template-columns: minmax(0,2fr) minmax(180px,1fr); gap: 15px; padding: 18px 22px; }
-    .filter-field { display: flex; flex-direction: column; gap: 8px; }
+    .filters { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 15px; padding: 18px 22px; }
+    .filter-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
     .filter-field label { color: #46556d; font-size: 12px; font-weight: 700; }
     .filter-field input, .filter-field select { width: 100%; min-height: 42px; padding: 10px 12px; border: 1px solid #dce3ed; border-radius: 6px; outline: none; color: #19243a; background: white; font: inherit; font-size: 12px; }
     .filter-field input:focus, .filter-field select:focus { border-color: #3978ed; box-shadow: 0 0 0 3px rgb(57 120 237 / 12%); }
@@ -206,10 +245,13 @@
     .empty-state { padding: 36px 18px; text-align: center; }
     .empty-state strong { font-size: 13px; }
     .empty-state p { margin: 7px 0 0; color: #8290a4; font-size: 12px; }
+    .validation-message { margin: 0 22px 18px; padding: 10px 12px; border-radius: 6px; color: #b42318; background: #ffebe9; font-size: 12px; }
+    .timeline-footer { padding: 12px 22px; border-top: 1px solid #edf0f5; color: #718096; font-size: 11px; }
     .disclaimer { margin: 0 0 8px; color: #7c899b; font-size: 11px; line-height: 1.6; }
 
     @@media (max-width: 900px) {
         .stats-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+        .filters { grid-template-columns: repeat(2,minmax(0,1fr)); }
     }
 
     @@media (max-width: 600px) {
@@ -219,34 +261,166 @@
         .panel-heading { padding: 16px; align-items: flex-start; }
         .filters { grid-template-columns: 1fr; padding: 16px; }
         .back-link { align-self: flex-start; }
+        .timeline-footer { padding: 12px 16px; }
     }
 </style>
 
 @code {
     private string _search = string.Empty;
+    private string _deviceFilter = string.Empty;
     private string _statusFilter = "All";
+    private int _timelineLimit = 100;
+    private string? _fromDate;
+    private string? _toDate;
 
-    private IReadOnlyList<CommandRecord> History => CommandState.History;
-    private IReadOnlyList<CommandAuditEntry> AuditEntries => CommandState.AuditLog;
+    private IReadOnlyList<CommandAuditEntry> AuditEntries =>
+        CommandState.AuditLog;
 
-    private List<CommandRecord> FilteredHistory =>
-        History
-            .Where(record =>
-                _statusFilter == "All" ||
-                string.Equals(record.Status, _statusFilter, StringComparison.OrdinalIgnoreCase))
-            .Where(record =>
-                string.IsNullOrWhiteSpace(_search) ||
-                record.DeviceId.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) ||
-                record.Command.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) ||
-                record.Priority.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) ||
-                record.Status.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) ||
-                record.Parameters.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase) ||
-                record.Details.Contains(_search.Trim(), StringComparison.OrdinalIgnoreCase))
-            .ToList();
+    private int ProcessedCount =>
+        CommandState.History.Count(record =>
+            record.Status == "Processed locally");
+
+    private bool TryGetDateRange(
+        out DateTimeOffset? from,
+        out DateTimeOffset? to,
+        out string error)
+    {
+        from = null;
+        to = null;
+        error = string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(_fromDate))
+        {
+            if (!DateOnly.TryParseExact(
+                    _fromDate,
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var fromDate))
+            {
+                error = "The start date is invalid.";
+                return false;
+            }
+
+            from = new DateTimeOffset(
+                fromDate.ToDateTime(TimeOnly.MinValue),
+                TimeZoneInfo.Local.GetUtcOffset(
+                    fromDate.ToDateTime(TimeOnly.MinValue)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(_toDate))
+        {
+            if (!DateOnly.TryParseExact(
+                    _toDate,
+                    "yyyy-MM-dd",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var toDate))
+            {
+                error = "The end date is invalid.";
+                return false;
+            }
+
+            var endOfDay = toDate.AddDays(1).ToDateTime(TimeOnly.MinValue);
+
+            to = new DateTimeOffset(
+                    endOfDay,
+                    TimeZoneInfo.Local.GetUtcOffset(endOfDay))
+                .AddTicks(-1);
+        }
+
+        if (from.HasValue && to.HasValue && from.Value > to.Value)
+        {
+            error = "The start date must not be later than the end date.";
+            return false;
+        }
+
+        return true;
+    }
+
+    private IReadOnlyList<CommandRecord> FilteredHistory
+    {
+        get
+        {
+            if (!TryGetDateRange(out var from, out var to, out _))
+                return Array.Empty<CommandRecord>();
+
+            var limit = _timelineLimit == 0
+                ? (int?)null
+                : _timelineLimit;
+
+            var timeline = CommandState.GetCommandTimeline(
+                from: from,
+                to: to,
+                deviceId: string.IsNullOrWhiteSpace(_deviceFilter)
+                    ? null
+                    : _deviceFilter,
+                limit: limit);
+
+            var search = _search.Trim();
+
+            return timeline
+                .Where(record =>
+                    _statusFilter == "All" ||
+                    string.Equals(
+                        record.Status,
+                        _statusFilter,
+                        StringComparison.OrdinalIgnoreCase))
+                .Where(record =>
+                    string.IsNullOrEmpty(search) ||
+                    record.DeviceId.Contains(
+                        search, StringComparison.OrdinalIgnoreCase) ||
+                    record.Command.Contains(
+                        search, StringComparison.OrdinalIgnoreCase) ||
+                    record.Priority.Contains(
+                        search, StringComparison.OrdinalIgnoreCase) ||
+                    record.Status.Contains(
+                        search, StringComparison.OrdinalIgnoreCase) ||
+                    record.Parameters.Contains(
+                        search, StringComparison.OrdinalIgnoreCase) ||
+                    record.Details.Contains(
+                        search, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+    }
+
+    private int MatchingHistoryCount
+    {
+        get
+        {
+            if (!TryGetDateRange(out var from, out var to, out _))
+                return 0;
+
+            return CommandState.GetCommandTimeline(
+                    from: from,
+                    to: to,
+                    deviceId: string.IsNullOrWhiteSpace(_deviceFilter)
+                        ? null
+                        : _deviceFilter)
+                .Count(record =>
+                    (_statusFilter == "All" ||
+                     string.Equals(
+                         record.Status,
+                         _statusFilter,
+                         StringComparison.OrdinalIgnoreCase)) &&
+                    MatchesSearch(record, _search.Trim()));
+        }
+    }
 
     protected override void OnInitialized()
     {
         CommandState.StateChanged += HandleStateChanged;
+    }
+
+    private static bool MatchesSearch(CommandRecord record, string search)
+    {
+        return string.IsNullOrEmpty(search) ||
+               record.DeviceId.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+               record.Command.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+               record.Priority.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+               record.Status.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+               record.Parameters.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+               record.Details.Contains(search, StringComparison.OrdinalIgnoreCase);
     }
 
     private void HandleStateChanged()
