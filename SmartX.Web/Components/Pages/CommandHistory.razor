@@ -1,64 +1,59 @@
 ﻿@page "/command-history"
-@using SmartX.Web.Services
 @using System.Globalization
-@implements IDisposable
+@using SmartX.Web.Services
 @inject CommandStateService CommandState
 
-<PageTitle>Command History | Smart-X</PageTitle>
+<PageTitle>Command History - Smart-X</PageTitle>
 
 <div class="history-page">
-    <header class="page-heading">
+    <header class="page-header">
         <div>
-            <span class="eyebrow">PART 2 / COMMAND MANAGEMENT</span>
-            <h1>Command History &amp; Audit</h1>
-            <p>Search command records and inspect chronological audit events.</p>
+            <h1>Command History</h1>
+            <p>Search and review submitted device commands.</p>
         </div>
-        <a class="back-link" href="/commands">← Command Console</a>
+
+        <button class="button button-primary" @onclick="RefreshHistory">
+            Refresh
+        </button>
     </header>
 
-    <section class="stats-grid">
-        <article class="stat-card">
-            <span>Total Commands</span>
-            <strong>@CommandState.HistoryCount</strong>
-        </article>
-        <article class="stat-card">
-            <span>Pending</span>
-            <strong>@CommandState.QueueCount</strong>
-        </article>
-        <article class="stat-card">
-            <span>Processed</span>
+    <section class="summary-grid">
+        <div class="summary-card">
+            <span>Matching commands</span>
+            <strong>@MatchingHistoryCount</strong>
+        </div>
+
+        <div class="summary-card">
+            <span>Processed commands</span>
             <strong>@ProcessedCount</strong>
-        </article>
-        <article class="stat-card">
-            <span>Audit Events</span>
-            <strong>@AuditEntries.Count</strong>
-        </article>
+        </div>
+
+        <div class="summary-card">
+            <span>Pending commands</span>
+            <strong>@CommandState.QueueCount</strong>
+        </div>
     </section>
 
     <section class="panel">
-        <div class="panel-heading">
-            <div>
-                <h2>Command Timeline</h2>
-                <p>Filter sorted command records by date, device, status, or search terms.</p>
-            </div>
-            <span class="count-badge">@FilteredHistory.Count records</span>
-        </div>
+        <h2>Filter history</h2>
 
-        <div class="filters">
+        <div class="filter-grid">
             <div class="filter-field">
-                <label for="historySearch">Search records</label>
-                <input id="historySearch"
-                       @bind="_search"
-                       @bind:event="oninput"
-                       placeholder="Search commands, devices, parameters..." />
+                <label for="search">Search</label>
+                <input id="search"
+                       type="search"
+                       placeholder="Command, device ID, or command ID"
+                       @bind="_searchText"
+                       @bind:event="oninput" />
             </div>
 
             <div class="filter-field">
                 <label for="deviceFilter">Device ID</label>
                 <input id="deviceFilter"
+                       type="text"
+                       placeholder="Filter by device"
                        @bind="_deviceFilter"
-                       @bind:event="oninput"
-                       placeholder="All devices" />
+                       @bind:event="oninput" />
             </div>
 
             <div class="filter-field">
@@ -73,122 +68,100 @@
             </div>
 
             <div class="filter-field">
-                <label for="timelineLimit">Maximum records</label>
-                <select id="timelineLimit" @bind="_timelineLimit">
-                    <option value="50">50 newest</option>
-                    <option value="100">100 newest</option>
-                    <option value="250">250 newest</option>
-                    <option value="500">500 newest</option>
-                    <option value="0">All matching</option>
-                </select>
-            </div>
-
-            <div class="filter-field">
                 <label for="fromDate">From date</label>
-                <input id="fromDate" type="date" @bind="_fromDate" />
+                <input id="fromDate"
+                       type="date"
+                       value="@_fromDate"
+                       @onchange="OnFromDateChanged" />
             </div>
 
             <div class="filter-field">
                 <label for="toDate">To date</label>
-                <input id="toDate" type="date" @bind="_toDate" />
+                <input id="toDate"
+                       type="date"
+                       value="@_toDate"
+                       @onchange="OnToDateChanged" />
             </div>
         </div>
 
-        @if (!TryGetDateRange(out _, out _, out var dateError))
+        <div class="filter-actions">
+            <button class="button button-primary" @onclick="ApplyFilters">
+                Apply filters
+            </button>
+
+            <button class="button button-secondary" @onclick="ClearFilters">
+                Clear filters
+            </button>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_validationMessage))
         {
-            <div class="validation-message" role="alert">@dateError</div>
+            <p class="validation-message">@_validationMessage</p>
         }
-        else if (FilteredHistory.Count == 0)
+    </section>
+
+    <section class="panel">
+        <div class="section-heading">
+            <div>
+                <h2>Command timeline</h2>
+                <p>Newest commands appear first. Up to @DisplayLimit results are shown.</p>
+            </div>
+
+            <span class="result-count">@FilteredHistory.Count() results shown</span>
+        </div>
+
+        @if (FilteredHistory.Count == 0)
         {
             <div class="empty-state">
-                <strong>No matching command records</strong>
-                <p>Change your filters or submit a command from the Command Console.</p>
+                <h3>No commands found</h3>
+                <p>Change your filters or clear them to see more commands.</p>
             </div>
         }
         else
         {
-            <div class="table-wrap">
+            <div class="table-wrapper">
                 <table>
                     <thead>
                         <tr>
                             <th>Created</th>
-                            <th>Device</th>
+                            <th>Device ID</th>
                             <th>Command</th>
                             <th>Priority</th>
                             <th>Status</th>
-                            <th>Details</th>
+                            <th>Command ID</th>
                         </tr>
                     </thead>
+
                     <tbody>
                         @foreach (var record in FilteredHistory)
                         {
                             <tr @key="record.Id">
-                                <td>@record.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
-                                <td class="device">@record.DeviceId</td>
-                                <td>@record.Command</td>
+                                <td>@FormatTimestamp(record.CreatedAt)</td>
+                                <td>@record.DeviceId</td>
                                 <td>
-                                    <span class="priority @PriorityClass(record.Priority)">
-                                        @record.Priority
-                                    </span>
+                                    <strong>@record.Command</strong>
+
+                                    @if (!string.IsNullOrWhiteSpace(record.Parameters))
+                                    {
+                                        <div class="secondary-text">
+                                            @record.Parameters
+                                        </div>
+                                    }
+
+                                    @if (!string.IsNullOrWhiteSpace(record.Details))
+                                    {
+                                        <div class="secondary-text">
+                                            @record.Details
+                                        </div>
+                                    }
                                 </td>
+                                <td>@record.Priority</td>
                                 <td>
-                                    <span class="status @StatusClass(record.Status)">
+                                    <span class="@GetStatusClass(record.Status)">
                                         @record.Status
                                     </span>
                                 </td>
-                                <td class="details" title="@record.Details">@record.Details</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        }
-
-        <div class="timeline-footer">
-            Displaying @FilteredHistory.Count of @MatchingHistoryCount matching records.
-        </div>
-    </section>
-
-    <section class="panel">
-        <div class="panel-heading">
-            <div>
-                <h2>Audit Trail</h2>
-                <p>Chronologically indexed command and error events, newest first.</p>
-            </div>
-            <span class="count-badge">@AuditEntries.Count events</span>
-        </div>
-
-        @if (AuditEntries.Count == 0)
-        {
-            <div class="empty-state">
-                <strong>No audit events recorded</strong>
-                <p>Events appear as commands and active errors are managed.</p>
-            </div>
-        }
-        else
-        {
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Timestamp</th>
-                            <th>Action</th>
-                            <th>Device</th>
-                            <th>Command</th>
-                            <th>Error Key</th>
-                            <th>Details</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var entry in AuditEntries)
-                        {
-                            <tr @key="entry.Sequence">
-                                <td>@entry.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff")</td>
-                                <td><span class="action-tag">@entry.Action</span></td>
-                                <td class="device">@DisplayOrDash(entry.DeviceId)</td>
-                                <td>@DisplayOrDash(entry.Command)</td>
-                                <td>@DisplayOrDash(entry.ErrorKey)</td>
-                                <td class="details" title="@entry.Details">@entry.Details</td>
+                                <td class="command-id">@record.Id</td>
                             </tr>
                         }
                     </tbody>
@@ -196,98 +169,336 @@
             </div>
         }
     </section>
-
-    <p class="disclaimer">
-        Records are maintained in memory for the current application session.
-        Command processing does not execute physical device operations.
-    </p>
 </div>
 
 <style>
-    .history-page { max-width: 1440px; margin: 0 auto; color: #19243a; }
-    .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
-    .eyebrow { color: #3978ed; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; }
-    .page-heading h1 { margin: 9px 0 7px; font-size: clamp(25px, 3vw, 32px); font-weight: 800; }
-    .page-heading p { margin: 0; color: #718096; font-size: 13px; line-height: 1.6; }
-    .back-link { display: inline-block; padding: 10px 13px; border: 1px solid #dce4ef; border-radius: 7px; color: #35445d; background: white; text-decoration: none; font-size: 12px; font-weight: 700; white-space: nowrap; }
-    .back-link:hover { border-color: #a8c4ff; background: #f7f9ff; }
-    .stats-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 15px; margin-bottom: 20px; }
-    .stat-card, .panel { min-width: 0; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; box-shadow: 0 2px 7px rgb(16 28 53 / 3%); }
-    .stat-card { padding: 19px 20px; display: flex; flex-direction: column; gap: 10px; }
-    .stat-card span { color: #718096; font-size: 12px; }
-    .stat-card strong { font-size: 28px; font-weight: 800; }
-    .panel { margin-bottom: 20px; overflow: hidden; }
-    .panel-heading { padding: 19px 22px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #edf0f5; }
-    .panel-heading h2 { margin: 0 0 5px; font-size: 16px; font-weight: 800; }
-    .panel-heading p { margin: 0; color: #718096; font-size: 12px; line-height: 1.6; }
-    .count-badge { padding: 6px 9px; border-radius: 5px; color: #536b91; background: #f0f4fa; font-size: 10px; font-weight: 750; white-space: nowrap; }
-    .filters { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 15px; padding: 18px 22px; }
-    .filter-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-    .filter-field label { color: #46556d; font-size: 12px; font-weight: 700; }
-    .filter-field input, .filter-field select { width: 100%; min-height: 42px; padding: 10px 12px; border: 1px solid #dce3ed; border-radius: 6px; outline: none; color: #19243a; background: white; font: inherit; font-size: 12px; }
-    .filter-field input:focus, .filter-field select:focus { border-color: #3978ed; box-shadow: 0 0 0 3px rgb(57 120 237 / 12%); }
-    .table-wrap { width: 100%; overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; text-align: left; white-space: nowrap; }
-    thead { background: #f8fafd; }
-    th { padding: 12px 17px; color: #718096; font-size: 10px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; }
-    td { padding: 14px 17px; border-top: 1px solid #edf0f5; color: #4c5b70; font-size: 12px; }
-    tbody tr:hover { background: #fafcff; }
-    .device { color: #243956; font-weight: 750; }
-    .details { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
-    .priority, .status, .action-tag { display: inline-block; padding: 5px 7px; border-radius: 4px; font-size: 10px; font-weight: 750; }
-    .priority-normal { color: #53647e; background: #edf1f6; }
-    .priority-high { color: #9a5b00; background: #fff2d9; }
-    .priority-critical { color: #b42318; background: #ffebe9; }
-    .status-queued { color: #245fc1; background: #eaf1ff; }
-    .status-processed { color: #176b4a; background: #e5f7ed; }
-    .status-undone, .status-cleared { color: #6b5b91; background: #f0eafd; }
-    .action-tag { color: #536b91; background: #f0f4fa; }
-    .empty-state { padding: 36px 18px; text-align: center; }
-    .empty-state strong { font-size: 13px; }
-    .empty-state p { margin: 7px 0 0; color: #8290a4; font-size: 12px; }
-    .validation-message { margin: 0 22px 18px; padding: 10px 12px; border-radius: 6px; color: #b42318; background: #ffebe9; font-size: 12px; }
-    .timeline-footer { padding: 12px 22px; border-top: 1px solid #edf0f5; color: #718096; font-size: 11px; }
-    .disclaimer { margin: 0 0 8px; color: #7c899b; font-size: 11px; line-height: 1.6; }
-
-    @@media (max-width: 900px) {
-        .stats-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
-        .filters { grid-template-columns: repeat(2,minmax(0,1fr)); }
+    .history-page {
+        max-width: 1450px;
+        margin: 0 auto;
+        padding: 24px;
+        color: var(--mud-palette-text-primary, #202938);
     }
 
-    @@media (max-width: 600px) {
-        .page-heading { flex-direction: column; }
-        .stats-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
-        .stat-card { padding: 15px; }
-        .panel-heading { padding: 16px; align-items: flex-start; }
-        .filters { grid-template-columns: 1fr; padding: 16px; }
-        .back-link { align-self: flex-start; }
-        .timeline-footer { padding: 12px 16px; }
+    .page-header,
+    .section-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+
+        .page-header h1 {
+            margin: 0 0 8px;
+            font-size: 2rem;
+            font-weight: 700;
+        }
+
+        .page-header p,
+        .section-heading p {
+            margin: 0;
+            color: var(--mud-palette-text-secondary, #667085);
+        }
+
+    .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+
+    .summary-card,
+    .panel {
+        padding: 20px;
+        border: 1px solid var(--mud-palette-lines-default, #e5e7eb);
+        border-radius: 12px;
+        background: var(--mud-palette-surface, #ffffff);
+    }
+
+    .summary-card {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+        .summary-card span {
+            color: var(--mud-palette-text-secondary, #667085);
+            font-size: 0.9rem;
+        }
+
+        .summary-card strong {
+            font-size: 1.8rem;
+        }
+
+    .panel {
+        margin-bottom: 24px;
+    }
+
+        .panel h2 {
+            margin: 0 0 18px;
+            font-size: 1.2rem;
+        }
+
+    .filter-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+    }
+
+    .filter-field {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+        .filter-field label {
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .filter-field input,
+        .filter-field select {
+            box-sizing: border-box;
+            width: 100%;
+            min-width: 0;
+            padding: 10px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            background: var(--mud-palette-surface, #ffffff);
+            color: inherit;
+        }
+
+    .filter-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 20px;
+    }
+
+    .button {
+        padding: 10px 16px;
+        border: 0;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    .button-primary {
+        background: #2563eb;
+        color: #ffffff;
+    }
+
+    .button-secondary {
+        background: #e5e7eb;
+        color: #1f2937;
+    }
+
+    .validation-message {
+        margin: 14px 0 0;
+        color: #b91c1c;
+    }
+
+    .section-heading {
+        margin-bottom: 18px;
+    }
+
+        .section-heading h2 {
+            margin-bottom: 6px;
+        }
+
+    .result-count {
+        padding: 6px 10px;
+        border-radius: 20px;
+        background: #eff6ff;
+        color: #1d4ed8;
+        font-size: 0.85rem;
+        white-space: nowrap;
+    }
+
+    .table-wrapper {
+        overflow-x: auto;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+    }
+
+    th,
+    td {
+        padding: 13px 12px;
+        border-bottom: 1px solid #e5e7eb;
+        vertical-align: top;
+    }
+
+    th {
+        color: var(--mud-palette-text-secondary, #667085);
+        font-size: 0.82rem;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    td {
+        font-size: 0.9rem;
+    }
+
+    .secondary-text {
+        margin-top: 5px;
+        color: var(--mud-palette-text-secondary, #667085);
+        font-size: 0.8rem;
+        overflow-wrap: anywhere;
+    }
+
+    .command-id {
+        min-width: 180px;
+        overflow-wrap: anywhere;
+        font-family: monospace;
+        font-size: 0.8rem;
+    }
+
+    .status-badge {
+        display: inline-block;
+        padding: 4px 9px;
+        border-radius: 20px;
+        font-size: 0.78rem;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .status-queued {
+        background: #fef3c7;
+        color: #92400e;
+    }
+
+    .status-processed {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    .status-undone,
+    .status-cleared {
+        background: #e5e7eb;
+        color: #374151;
+    }
+
+    .status-default {
+        background: #f3f4f6;
+        color: #374151;
+    }
+
+    .empty-state {
+        padding: 40px 20px;
+        text-align: center;
+    }
+
+        .empty-state h3 {
+            margin: 0 0 8px;
+        }
+
+        .empty-state p {
+            margin: 0;
+            color: var(--mud-palette-text-secondary, #667085);
+        }
+
+    @@media (max-width: 850px) {
+        .filter-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .summary-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @@media (max-width: 560px) {
+        .history-page {
+            padding: 14px;
+        }
+
+        .page-header,
+        .section-heading {
+            align-items: flex-start;
+            flex-direction: column;
+        }
+
+        .filter-grid {
+            grid-template-columns: 1fr;
+        }
     }
 </style>
 
 @code {
-    private string _search = string.Empty;
+    private const int DisplayLimit = 100;
+
+    private string _searchText = string.Empty;
     private string _deviceFilter = string.Empty;
     private string _statusFilter = "All";
-    private int _timelineLimit = 100;
     private string? _fromDate;
     private string? _toDate;
+    private string? _validationMessage;
 
-    private IReadOnlyList<CommandAuditEntry> AuditEntries =>
-        CommandState.AuditLog;
+    private List<CommandRecord> FilteredHistory =>
+        GetFilteredHistory();
+
+    private int MatchingHistoryCount =>
+        GetAllFilteredHistory().Count;
 
     private int ProcessedCount =>
         CommandState.History.Count(record =>
-            record.Status == "Processed locally");
+            string.Equals(
+                record.Status,
+                "Processed locally",
+                StringComparison.OrdinalIgnoreCase));
+
+    private void OnFromDateChanged(ChangeEventArgs e)
+    {
+        _fromDate = e.Value?.ToString();
+        _validationMessage = null;
+    }
+
+    private void OnToDateChanged(ChangeEventArgs e)
+    {
+        _toDate = e.Value?.ToString();
+        _validationMessage = null;
+    }
+
+    private void ApplyFilters()
+    {
+        _validationMessage = null;
+
+        if (!TryGetDateRange(out _, out _))
+        {
+            _validationMessage =
+                "Enter valid dates and ensure the From date is not after the To date.";
+        }
+    }
+
+    private void ClearFilters()
+    {
+        _searchText = string.Empty;
+        _deviceFilter = string.Empty;
+        _statusFilter = "All";
+        _fromDate = null;
+        _toDate = null;
+        _validationMessage = null;
+    }
+
+    private void RefreshHistory()
+    {
+        StateHasChanged();
+    }
 
     private bool TryGetDateRange(
         out DateTimeOffset? from,
-        out DateTimeOffset? to,
-        out string error)
+        out DateTimeOffset? toExclusive)
     {
         from = null;
-        to = null;
-        error = string.Empty;
+        toExclusive = null;
+
+        DateOnly? fromDate = null;
+        DateOnly? toDate = null;
 
         if (!string.IsNullOrWhiteSpace(_fromDate))
         {
@@ -296,16 +507,12 @@
                     "yyyy-MM-dd",
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.None,
-                    out var fromDate))
+                    out var parsedFrom))
             {
-                error = "The start date is invalid.";
                 return false;
             }
 
-            from = new DateTimeOffset(
-                fromDate.ToDateTime(TimeOnly.MinValue),
-                TimeZoneInfo.Local.GetUtcOffset(
-                    fromDate.ToDateTime(TimeOnly.MinValue)));
+            fromDate = parsedFrom;
         }
 
         if (!string.IsNullOrWhiteSpace(_toDate))
@@ -315,142 +522,129 @@
                     "yyyy-MM-dd",
                     CultureInfo.InvariantCulture,
                     DateTimeStyles.None,
-                    out var toDate))
+                    out var parsedTo))
             {
-                error = "The end date is invalid.";
                 return false;
             }
 
-            var endOfDay = toDate.AddDays(1).ToDateTime(TimeOnly.MinValue);
-
-            to = new DateTimeOffset(
-                    endOfDay,
-                    TimeZoneInfo.Local.GetUtcOffset(endOfDay))
-                .AddTicks(-1);
+            toDate = parsedTo;
         }
 
-        if (from.HasValue && to.HasValue && from.Value > to.Value)
+        if (fromDate.HasValue &&
+            toDate.HasValue &&
+            fromDate.Value > toDate.Value)
         {
-            error = "The start date must not be later than the end date.";
             return false;
+        }
+
+        if (fromDate.HasValue)
+        {
+            var localStart = fromDate.Value.ToDateTime(TimeOnly.MinValue);
+            from = new DateTimeOffset(
+                localStart,
+                TimeZoneInfo.Local.GetUtcOffset(localStart));
+        }
+
+        if (toDate.HasValue)
+        {
+            var localEnd = toDate.Value
+                .AddDays(1)
+                .ToDateTime(TimeOnly.MinValue);
+
+            toExclusive = new DateTimeOffset(
+                localEnd,
+                TimeZoneInfo.Local.GetUtcOffset(localEnd));
         }
 
         return true;
     }
 
-    private IReadOnlyList<CommandRecord> FilteredHistory
+    private List<CommandRecord> GetFilteredHistory()
     {
-        get
-        {
-            if (!TryGetDateRange(out var from, out var to, out _))
-                return Array.Empty<CommandRecord>();
+        if (!TryGetDateRange(out _, out _))
+            return new List<CommandRecord>();
 
-            var limit = _timelineLimit == 0
-                ? (int?)null
-                : _timelineLimit;
+        return GetAllFilteredHistory()
+            .Take(DisplayLimit)
+            .ToList();
+    }
 
-            var timeline = CommandState.GetCommandTimeline(
+    private List<CommandRecord> GetAllFilteredHistory()
+    {
+        if (!TryGetDateRange(out var from, out var toExclusive))
+            return new List<CommandRecord>();
+
+        IEnumerable<CommandRecord> records =
+            CommandState.GetCommandTimeline(
                 from: from,
-                to: to,
-                deviceId: string.IsNullOrWhiteSpace(_deviceFilter)
-                    ? null
-                    : _deviceFilter,
-                limit: limit);
+                to: toExclusive);
 
-            var search = _search.Trim();
+        if (!string.IsNullOrWhiteSpace(_deviceFilter))
+        {
+            var device = _deviceFilter.Trim();
 
-            return timeline
-                .Where(record =>
-                    _statusFilter == "All" ||
-                    string.Equals(
-                        record.Status,
-                        _statusFilter,
-                        StringComparison.OrdinalIgnoreCase))
-                .Where(record =>
-                    string.IsNullOrEmpty(search) ||
-                    record.DeviceId.Contains(
-                        search, StringComparison.OrdinalIgnoreCase) ||
-                    record.Command.Contains(
-                        search, StringComparison.OrdinalIgnoreCase) ||
-                    record.Priority.Contains(
-                        search, StringComparison.OrdinalIgnoreCase) ||
-                    record.Status.Contains(
-                        search, StringComparison.OrdinalIgnoreCase) ||
-                    record.Parameters.Contains(
-                        search, StringComparison.OrdinalIgnoreCase) ||
-                    record.Details.Contains(
-                        search, StringComparison.OrdinalIgnoreCase))
-                .ToArray();
+            records = records.Where(record =>
+                record.DeviceId.Contains(
+                    device,
+                    StringComparison.OrdinalIgnoreCase));
         }
-    }
 
-    private int MatchingHistoryCount
-    {
-        get
+        if (!string.Equals(
+                _statusFilter,
+                "All",
+                StringComparison.OrdinalIgnoreCase))
         {
-            if (!TryGetDateRange(out var from, out var to, out _))
-                return 0;
-
-            return CommandState.GetCommandTimeline(
-                    from: from,
-                    to: to,
-                    deviceId: string.IsNullOrWhiteSpace(_deviceFilter)
-                        ? null
-                        : _deviceFilter)
-                .Count(record =>
-                    (_statusFilter == "All" ||
-                     string.Equals(
-                         record.Status,
-                         _statusFilter,
-                         StringComparison.OrdinalIgnoreCase)) &&
-                    MatchesSearch(record, _search.Trim()));
+            records = records.Where(record =>
+                string.Equals(
+                    record.Status,
+                    _statusFilter,
+                    StringComparison.OrdinalIgnoreCase));
         }
-    }
 
-    protected override void OnInitialized()
-    {
-        CommandState.StateChanged += HandleStateChanged;
-    }
-
-    private static bool MatchesSearch(CommandRecord record, string search)
-    {
-        return string.IsNullOrEmpty(search) ||
-               record.DeviceId.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-               record.Command.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-               record.Priority.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-               record.Status.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-               record.Parameters.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-               record.Details.Contains(search, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private void HandleStateChanged()
-    {
-        _ = InvokeAsync(StateHasChanged);
-    }
-
-    private static string DisplayOrDash(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? "—" : value;
-
-    private static string PriorityClass(string priority) =>
-        priority.ToLowerInvariant() switch
+        if (!string.IsNullOrWhiteSpace(_searchText))
         {
-            "critical" => "priority-critical",
-            "high" => "priority-high",
-            _ => "priority-normal"
-        };
+            var search = _searchText.Trim();
 
-    private static string StatusClass(string status) =>
-        status.ToLowerInvariant() switch
-        {
-            "queued" => "status-queued",
-            "processed locally" => "status-processed",
-            "undone" => "status-undone",
-            "cleared" => "status-cleared",
-            _ => "status-queued"
-        };
+            records = records.Where(record =>
+                record.DeviceId.Contains(
+                    search,
+                    StringComparison.OrdinalIgnoreCase)
+                || record.Command.Contains(
+                    search,
+                    StringComparison.OrdinalIgnoreCase)
+                || record.Id.ToString().Contains(
+                    search,
+                    StringComparison.OrdinalIgnoreCase)
+                || record.Status.Contains(
+                    search,
+                    StringComparison.OrdinalIgnoreCase)
+                || record.Priority.Contains(
+                    search,
+                    StringComparison.OrdinalIgnoreCase)
+                || record.Parameters.Contains(
+                    search,
+                    StringComparison.OrdinalIgnoreCase));
+        }
 
-    public void Dispose()
+        return records.ToList();
+    }
+
+    private static string FormatTimestamp(DateTimeOffset timestamp)
     {
-        CommandState.StateChanged -= HandleStateChanged;
+        return timestamp.ToLocalTime().ToString(
+            "yyyy-MM-dd HH:mm:ss",
+            CultureInfo.CurrentCulture);
+    }
+
+    private static string GetStatusClass(string status)
+    {
+        return status switch
+        {
+            "Queued" => "status-badge status-queued",
+            "Processed locally" => "status-badge status-processed",
+            "Undone" => "status-badge status-undone",
+            "Cleared" => "status-badge status-cleared",
+            _ => "status-badge status-default"
+        };
     }
 }
