@@ -1,12 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-
+﻿
 namespace SmartX.Web.Services;
 
 public sealed class RecommendationEngine
 {
-    private static readonly TimeSpan StaleTelemetryThreshold =
+    private static readonly TimeSpan StaleThreshold =
         TimeSpan.FromMinutes(15);
 
     private readonly CommandStateService _commandState;
@@ -21,408 +18,370 @@ public sealed class RecommendationEngine
         IEnumerable<TelemetryObservation>? telemetry = null,
         string? searchQuery = null)
     {
-        var now = DateTimeOffset.UtcNow;
         var recommendations = new List<SmartXRecommendation>();
+        var observations = (telemetry ?? Enumerable.Empty<TelemetryObservation>())
+            .ToList();
 
-        var readings = telemetry?
-            .Where(reading => reading is not null)
-            .ToList() ?? new List<TelemetryObservation>();
+        var now = DateTime.UtcNow;
 
-        var queuedCommands = _commandState.Queue;
-        var history = _commandState.History;
-        var activeErrors = _commandState.ActiveErrors;
-
-        AnalyzeTelemetry(readings, recommendations, now);
-        AnalyzeCommandQueue(queuedCommands, recommendations);
-        AnalyzeCommandHistory(history, recommendations);
-        AnalyzeActiveErrors(activeErrors, recommendations);
-        AnalyzeSearchQuery(
-            searchQuery,
-            queuedCommands.Count,
-            history.Count,
-            recommendations);
+        AnalyzeTelemetry(observations, recommendations, now);
+        AnalyzeTrends(observations, recommendations);
+        AnalyzeCommandQueue(recommendations, now);
+        AnalyzeCommandHistory(recommendations, now);
+        AnalyzeActiveErrors(recommendations);
+        AnalyzeSearchQuery(searchQuery, recommendations);
 
         return recommendations
             .GroupBy(
-                recommendation => string.Join(
-                    "|",
-                    recommendation.Title,
-                    recommendation.DeviceId),
+                x => $"{x.Title}|{x.DeviceId}",
                 StringComparer.OrdinalIgnoreCase)
-            .Select(group => group
-                .OrderBy(item => item.Severity)
-                .First())
-            .OrderBy(item => item.Severity)
-            .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(item => item.DeviceId, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+            .Select(group => group.OrderBy(x => x.Severity).First())
+            .OrderBy(x => x.Severity)
+            .ThenBy(x => x.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList()
+            .AsReadOnly();
     }
 
     private static void AnalyzeTelemetry(
-        IReadOnlyCollection<TelemetryObservation> readings,
+        IReadOnlyCollection<TelemetryObservation> observations,
         ICollection<SmartXRecommendation> recommendations,
-        DateTimeOffset now)
+        DateTime now)
     {
-        foreach (var reading in readings)
+        foreach (var item in observations)
         {
-            if (string.IsNullOrWhiteSpace(reading.DeviceId) ||
-                string.IsNullOrWhiteSpace(reading.Metric))
+            var metric = item.Metric?.Trim() ?? string.Empty;
+            var normalized = metric.ToLowerInvariant();
+
+            if (!double.IsFinite(item.Value))
             {
+                Add(recommendations, "Invalid telemetry reading",
+                    $"{metric} returned a non-finite value. Inspect the sensor.",
+                    RecommendationSeverity.Critical, item.DeviceId);
                 continue;
             }
 
-            var deviceId = reading.DeviceId.Trim();
-            var metric = reading.Metric.Trim();
-            var normalizedMetric = metric.ToLowerInvariant();
-            var value = reading.Value;
-            var unit = reading.Unit?.Trim() ?? string.Empty;
+            var observedAt = AsUtc(item.ObservedAt);
 
-            if (double.IsNaN(value) || double.IsInfinity(value))
+            if (observedAt > now.AddMinutes(5))
             {
-                recommendations.Add(new SmartXRecommendation(
-                    "Invalid telemetry value",
-                    $"{deviceId}: metric '{metric}' contains a non-finite value. Verify the sensor and ingestion pipeline.",
-                    RecommendationSeverity.Warning,
-                    deviceId));
-
-                continue;
+                Add(recommendations, "Future telemetry timestamp",
+                    $"{metric} has a future timestamp. Check device clock synchronisation.",
+                    RecommendationSeverity.Warning, item.DeviceId);
             }
 
-            if (reading.ObservedAt > now.AddMinutes(5))
+            if (now - observedAt > StaleThreshold)
             {
-                recommendations.Add(new SmartXRecommendation(
-                    "Telemetry timestamp is in the future",
-                    $"{deviceId}: metric '{metric}' has a timestamp of {reading.ObservedAt:u}. Check device clock synchronization.",
-                    RecommendationSeverity.Warning,
-                    deviceId));
-
-                continue;
+                Add(recommendations, "Stale telemetry",
+                    $"{metric} was last observed at {observedAt:u}. Check connectivity and ingestion.",
+                    RecommendationSeverity.Warning, item.DeviceId);
             }
 
-            if (IsTemperatureMetric(normalizedMetric) && value >= 80)
+            if (normalized.Contains("temperature"))
             {
-                recommendations.Add(new SmartXRecommendation(
-                    "High temperature detected",
-                    $"{deviceId}: {FormatValue(value, unit)}. Inspect device cooling, sensor accuracy, and operating conditions.",
-                    value >= 95
-                        ? RecommendationSeverity.Critical
-                        : RecommendationSeverity.Warning,
-                    deviceId));
+                if (item.Value >= 95)
+                    Add(recommendations, "Critical temperature",
+                        $"Temperature is {item.Value:0.##}{item.Unit}. Investigate overheating immediately.",
+                        RecommendationSeverity.Critical, item.DeviceId);
+                else if (item.Value >= 80)
+                    Add(recommendations, "Elevated temperature",
+                        $"Temperature is {item.Value:0.##}{item.Unit}. Inspect cooling and equipment load.",
+                        RecommendationSeverity.Warning, item.DeviceId);
             }
 
-            if (IsBatteryMetric(normalizedMetric) && value <= 20)
+            if (normalized.Contains("battery"))
             {
-                recommendations.Add(new SmartXRecommendation(
-                    "Low battery level",
-                    $"{deviceId}: battery level is {FormatValue(value, unit)}. Schedule charging or battery replacement.",
-                    value <= 10
-                        ? RecommendationSeverity.Critical
-                        : RecommendationSeverity.Warning,
-                    deviceId));
+                if (item.Value <= 10)
+                    Add(recommendations, "Critical battery level",
+                        $"Battery is at {item.Value:0.##}{item.Unit}. Charge or replace it promptly.",
+                        RecommendationSeverity.Critical, item.DeviceId);
+                else if (item.Value <= 20)
+                    Add(recommendations, "Low battery level",
+                        $"Battery is at {item.Value:0.##}{item.Unit}. Schedule charging or replacement.",
+                        RecommendationSeverity.Warning, item.DeviceId);
             }
 
-            if (IsSignalMetric(normalizedMetric) && value <= -85)
+            if (normalized.Contains("signal"))
             {
-                recommendations.Add(new SmartXRecommendation(
-                    "Weak network signal",
-                    $"{deviceId}: signal strength is {FormatValue(value, unit)}. Check device placement, interference, and gateway coverage.",
-                    value <= -100
-                        ? RecommendationSeverity.Critical
-                        : RecommendationSeverity.Warning,
-                    deviceId));
+                if (item.Value <= -100)
+                    Add(recommendations, "Critical signal strength",
+                        $"Signal is {item.Value:0.##}{item.Unit}. Check antenna and network coverage.",
+                        RecommendationSeverity.Critical, item.DeviceId);
+                else if (item.Value <= -85)
+                    Add(recommendations, "Weak signal strength",
+                        $"Signal is {item.Value:0.##}{item.Unit}. Check interference and connectivity.",
+                        RecommendationSeverity.Warning, item.DeviceId);
             }
 
-            if (IsHumidityMetric(normalizedMetric) && value >= 90)
+            if (normalized.Contains("humidity"))
             {
-                recommendations.Add(new SmartXRecommendation(
-                    "High humidity detected",
-                    $"{deviceId}: humidity is {FormatValue(value, unit)}. Verify the reading and inspect environmental conditions.",
-                    value >= 98
-                        ? RecommendationSeverity.Critical
-                        : RecommendationSeverity.Warning,
-                    deviceId));
-            }
-
-            var age = now - reading.ObservedAt;
-
-            if (age > StaleTelemetryThreshold)
-            {
-                recommendations.Add(new SmartXRecommendation(
-                    "Telemetry reading is stale",
-                    $"{deviceId}: '{metric}' was last observed {FormatAge(age)} ago. Verify sensor reporting and network connectivity.",
-                    RecommendationSeverity.Warning,
-                    deviceId));
+                if (item.Value >= 98)
+                    Add(recommendations, "Critical humidity",
+                        $"Humidity is {item.Value:0.##}{item.Unit}. Inspect moisture and condensation risks.",
+                        RecommendationSeverity.Critical, item.DeviceId);
+                else if (item.Value >= 90)
+                    Add(recommendations, "High humidity",
+                        $"Humidity is {item.Value:0.##}{item.Unit}. Check ventilation and moisture control.",
+                        RecommendationSeverity.Warning, item.DeviceId);
             }
         }
-
-        AnalyzeTelemetryGaps(readings, recommendations, now);
     }
 
-    private static void AnalyzeTelemetryGaps(
-        IReadOnlyCollection<TelemetryObservation> readings,
-        ICollection<SmartXRecommendation> recommendations,
-        DateTimeOffset now)
+    private static void AnalyzeTrends(
+        IReadOnlyCollection<TelemetryObservation> observations,
+        ICollection<SmartXRecommendation> recommendations)
     {
-        var latestByDevice = readings
-            .Where(reading =>
-                !string.IsNullOrWhiteSpace(reading.DeviceId))
-            .GroupBy(
-                reading => reading.DeviceId.Trim(),
-                StringComparer.OrdinalIgnoreCase)
-            .Select(group => new
+        var groups = observations
+            .Where(x => double.IsFinite(x.Value))
+            .GroupBy(x => new
             {
-                DeviceId = group.Key,
-                Latest = group.Max(reading => reading.ObservedAt)
+                x.DeviceId,
+                Metric = x.Metric ?? string.Empty
             });
 
-        foreach (var device in latestByDevice)
+        foreach (var group in groups)
         {
-            if (now - device.Latest <= StaleTelemetryThreshold)
+            var readings = group
+                .OrderBy(x => AsUtc(x.ObservedAt))
+                .TakeLast(6)
+                .ToList();
+
+            if (readings.Count < 4)
                 continue;
 
-            recommendations.Add(new SmartXRecommendation(
-                "Device telemetry may be offline",
-                $"{device.DeviceId}: the latest supplied telemetry is {FormatAge(now - device.Latest)} old. Check connectivity and sensor reporting.",
-                RecommendationSeverity.Warning,
-                device.DeviceId));
+            var first = readings[0];
+            var last = readings[^1];
+
+            var elapsedMinutes =
+                (AsUtc(last.ObservedAt) - AsUtc(first.ObservedAt))
+                .TotalMinutes;
+
+            if (elapsedMinutes <= 0)
+                continue;
+
+            var change = last.Value - first.Value;
+
+            var relativeChange = Math.Abs(change) /
+                Math.Max(Math.Abs(first.Value), 1d);
+
+            if (relativeChange < 0.20)
+                continue;
+
+            var metric = group.Key.Metric;
+            var normalized = metric.ToLowerInvariant();
+
+            var concerning =
+                (change > 0 &&
+                    (normalized.Contains("temperature") ||
+                     normalized.Contains("humidity") ||
+                     normalized.Contains("pressure") ||
+                     normalized.Contains("power") ||
+                     normalized.Contains("voltage"))) ||
+                (change < 0 &&
+                    (normalized.Contains("battery") ||
+                     normalized.Contains("signal")));
+
+            if (!concerning)
+                continue;
+
+            Add(recommendations, $"{metric} trend requires attention",
+                $"{metric} changed from {first.Value:0.##}{first.Unit} to {last.Value:0.##}{last.Unit} over {elapsedMinutes:0.#} minutes. Review the trend before operating conditions deteriorate.",
+                relativeChange >= 0.50
+                    ? RecommendationSeverity.Warning
+                    : RecommendationSeverity.Info,
+                group.Key.DeviceId);
         }
     }
 
-    private static void AnalyzeCommandQueue(
-        IReadOnlyList<CommandRecord> queuedCommands,
-        ICollection<SmartXRecommendation> recommendations)
+    private void AnalyzeCommandQueue(
+        ICollection<SmartXRecommendation> recommendations,
+        DateTime now)
     {
-        var criticalCommands = queuedCommands
-            .Where(command => command.Status == "Queued")
-            .Where(command => string.Equals(
-                command.Priority,
-                "Critical",
-                StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        var queue = _commandState.Queue.ToList();
 
-        if (criticalCommands.Count > 0)
+        var criticalCount = queue.Count(x =>
+            x.Priority.ToString().Contains(
+                "Critical", StringComparison.OrdinalIgnoreCase));
+
+        var highCount = queue.Count(x =>
+            x.Priority.ToString().Contains(
+                "High", StringComparison.OrdinalIgnoreCase));
+
+        if (criticalCount > 0)
+            Add(recommendations, "Critical commands awaiting processing",
+                $"{criticalCount} critical command(s) are queued. Process and verify them promptly.",
+                RecommendationSeverity.Critical);
+
+        if (highCount > 0)
+            Add(recommendations, "High-priority commands awaiting processing",
+                $"{highCount} high-priority command(s) are waiting. Review the queue.",
+                RecommendationSeverity.Warning);
+
+        if (queue.Count >= 25)
+            Add(recommendations, "Critical command backlog",
+                $"{queue.Count} commands are queued. Investigate processing delays.",
+                RecommendationSeverity.Critical);
+        else if (queue.Count >= 10)
+            Add(recommendations, "Growing command backlog",
+                $"{queue.Count} commands are queued. Review processing speed and failures.",
+                RecommendationSeverity.Warning);
+
+        foreach (var group in queue
+            .GroupBy(x => new
+            {
+                x.DeviceId,
+                Command = x.Command ?? string.Empty
+            })
+            .Where(x => x.Count() >= 3))
         {
-            recommendations.Add(new SmartXRecommendation(
-                "Critical commands are pending",
-                $"{criticalCommands.Count} critical command(s) are waiting. Review their targets and priority before routine operations.",
-                RecommendationSeverity.Critical));
+            Add(recommendations, "Repeated queued commands",
+                $"{group.Count()} copies of '{group.Key.Command}' target the same device. Check for duplicate submissions.",
+                RecommendationSeverity.Warning, group.Key.DeviceId);
         }
 
-        var highPriorityCount = queuedCommands.Count(command =>
-            command.Status == "Queued" &&
-            string.Equals(
-                command.Priority,
-                "High",
-                StringComparison.OrdinalIgnoreCase));
-
-        if (highPriorityCount > 0)
+        foreach (var command in queue)
         {
-            recommendations.Add(new SmartXRecommendation(
-                "High-priority commands are pending",
-                $"{highPriorityCount} high-priority command(s) remain queued. Review the queue for time-sensitive operations.",
-                RecommendationSeverity.Warning));
-        }
-
-        var pendingCount = queuedCommands.Count(
-            command => command.Status == "Queued");
-
-        if (pendingCount >= 10)
-        {
-            recommendations.Add(new SmartXRecommendation(
-                "Command queue backlog",
-                $"{pendingCount} commands are waiting. Review command throughput and verify that queue processing is keeping pace.",
-                pendingCount >= 25
-                    ? RecommendationSeverity.Critical
-                    : RecommendationSeverity.Warning));
-        }
-
-        var duplicatePendingGroups = queuedCommands
-            .Where(command => command.Status == "Queued")
-            .GroupBy(
-                command => $"{command.DeviceId.Trim()}|{command.Command.Trim()}",
-                StringComparer.OrdinalIgnoreCase)
-            .Where(group => group.Count() >= 3)
-            .OrderByDescending(group => group.Count())
-            .Take(3);
-
-        foreach (var group in duplicatePendingGroups)
-        {
-            var sample = group.First();
-
-            recommendations.Add(new SmartXRecommendation(
-                "Repeated commands in queue",
-                $"{group.Count()} copies of '{sample.Command}' are pending for {sample.DeviceId}. Check for accidental duplicate submissions.",
-                RecommendationSeverity.Warning,
-                sample.DeviceId));
-        }
-    }
-
-    private static void AnalyzeCommandHistory(
-        IReadOnlyList<CommandRecord> history,
-        ICollection<SmartXRecommendation> recommendations)
-    {
-        var recentCommands = history
-            .OrderByDescending(command => command.CreatedAt)
-            .ToList();
-
-        var repeatedCommands = recentCommands
-            .Where(command =>
-                command.Status is "Queued" or "Processed locally")
-            .GroupBy(
-                command => $"{command.DeviceId.Trim()}|{command.Command.Trim()}",
-                StringComparer.OrdinalIgnoreCase)
-            .Where(group => group.Count() >= 3)
-            .OrderByDescending(group => group.Count())
-            .Take(3);
-
-        foreach (var group in repeatedCommands)
-        {
-            var sample = group.First();
-
-            recommendations.Add(new SmartXRecommendation(
-                "Repeated command activity",
-                $"'{sample.Command}' appears {group.Count()} times in recorded activity for {sample.DeviceId}. Verify that repeated submissions are intentional.",
-                RecommendationSeverity.Info,
-                sample.DeviceId));
-        }
-
-        var oldestPending = recentCommands
-            .Where(command => command.Status == "Queued")
-            .OrderBy(command => command.CreatedAt)
-            .FirstOrDefault();
-
-        if (oldestPending is not null)
-        {
-            var age = DateTimeOffset.UtcNow - oldestPending.CreatedAt;
+            var age = now - AsUtc(command.CreatedAt);
 
             if (age > TimeSpan.FromMinutes(10))
             {
-                recommendations.Add(new SmartXRecommendation(
-                    "Command waiting for processing",
-                    $"Command '{oldestPending.Command}' for {oldestPending.DeviceId} has been queued for {FormatAge(age)}.",
-                    RecommendationSeverity.Warning,
-                    oldestPending.DeviceId));
+                Add(recommendations, "Command waiting too long",
+                    $"Command '{command.Command}' has been waiting for {age.TotalMinutes:0} minutes.",
+                    age > TimeSpan.FromMinutes(30)
+                        ? RecommendationSeverity.Critical
+                        : RecommendationSeverity.Warning,
+                    command.DeviceId);
             }
         }
     }
 
-    private static void AnalyzeActiveErrors(
-        IReadOnlyCollection<string> activeErrors,
+    private void AnalyzeCommandHistory(
+        ICollection<SmartXRecommendation> recommendations,
+        DateTime now)
+    {
+        var history = _commandState.History.ToList();
+
+        foreach (var group in history
+            .Where(x => x.Status.ToString().Contains(
+                "Fail", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(x => new
+            {
+                x.DeviceId,
+                Command = x.Command ?? string.Empty
+            })
+            .Where(x => x.Count() >= 3))
+        {
+            Add(recommendations, "Repeated command failures",
+                $"Command '{group.Key.Command}' has failed repeatedly. Investigate the device and command parameters.",
+                RecommendationSeverity.Critical, group.Key.DeviceId);
+        }
+
+        var recentCount = history.Count(x =>
+            AsUtc(x.CreatedAt) >= now.AddHours(-1));
+
+        if (recentCount >= 50)
+        {
+            Add(recommendations, "Unusually high command activity",
+                $"{recentCount} commands were recorded in the last hour. Check for excessive retries or automation loops.",
+                RecommendationSeverity.Warning);
+        }
+    }
+
+    private void AnalyzeActiveErrors(
         ICollection<SmartXRecommendation> recommendations)
     {
-        if (activeErrors.Count == 0)
-            return;
+        var errors = _commandState.ActiveErrors.ToList();
 
-        recommendations.Add(new SmartXRecommendation(
-            "Active errors require attention",
-            $"{activeErrors.Count} active error(s) remain unresolved. Review the error registry and resolve issues after verification.",
-            activeErrors.Count >= 5
-                ? RecommendationSeverity.Critical
-                : RecommendationSeverity.Warning));
-
-        foreach (var error in activeErrors.Take(3))
+        if (errors.Count > 0)
         {
-            recommendations.Add(new SmartXRecommendation(
-                "Unresolved error",
-                $"Active error: {error}. Investigate the underlying condition and resolve it when confirmed.",
-                RecommendationSeverity.Warning,
-                error));
+            Add(recommendations, "Unresolved operational errors",
+                $"{errors.Count} active error(s) remain unresolved. Review root causes before resolving them.",
+                errors.Count >= 10
+                    ? RecommendationSeverity.Critical
+                    : RecommendationSeverity.Warning);
+        }
+
+        foreach (var error in errors)
+        {
+            Add(recommendations, "Active error needs investigation",
+                error, RecommendationSeverity.Warning);
         }
     }
 
     private static void AnalyzeSearchQuery(
         string? searchQuery,
-        int queuedCount,
-        int historyCount,
         ICollection<SmartXRecommendation> recommendations)
     {
         if (string.IsNullOrWhiteSpace(searchQuery))
             return;
 
-        var query = searchQuery.Trim();
+        var query = searchQuery.Trim().ToLowerInvariant();
 
-        if (ContainsAny(query, "offline", "disconnect", "unreachable"))
-        {
-            recommendations.Add(new SmartXRecommendation(
-                "Investigate device connectivity",
-                "Check recent telemetry timestamps, gateway reachability, signal quality, and device connectivity before retrying commands.",
-                RecommendationSeverity.Warning));
-        }
+        if (query.Contains("battery") || query.Contains("power"))
+            Add(recommendations, "Review power availability",
+                "Check battery levels, power readings and device connectivity.",
+                RecommendationSeverity.Info);
 
-        if (ContainsAny(query, "temperature", "overheat", "thermal"))
-        {
-            recommendations.Add(new SmartXRecommendation(
-                "Review thermal telemetry",
-                "Compare recent temperature readings against operating limits and inspect sustained increases rather than relying on a single reading.",
-                RecommendationSeverity.Info));
-        }
+        if (query.Contains("temperature") || query.Contains("heat") ||
+            query.Contains("cooling"))
+            Add(recommendations, "Review thermal conditions",
+                "Compare recent temperature readings and verify cooling operation.",
+                RecommendationSeverity.Info);
 
-        if (ContainsAny(query, "battery", "power", "low energy"))
-        {
-            recommendations.Add(new SmartXRecommendation(
-                "Review device power status",
-                "Inspect battery telemetry, power-related alerts, and recent reporting gaps before scheduling maintenance.",
-                RecommendationSeverity.Info));
-        }
+        if (query.Contains("signal") || query.Contains("offline") ||
+            query.Contains("connectivity"))
+            Add(recommendations, "Review device connectivity",
+                "Inspect signal strength, telemetry timestamps and ingestion failures.",
+                RecommendationSeverity.Info);
 
-        if (ContainsAny(query, "command", "queue", "history", "failed"))
-        {
-            recommendations.Add(new SmartXRecommendation(
-                "Review command activity",
-                $"The application records {queuedCount} queued command(s) and {historyCount} command record(s). Review their statuses and device targets.",
-                RecommendationSeverity.Info));
-        }
+        if (query.Contains("error") || query.Contains("failure") ||
+            query.Contains("failed"))
+            Add(recommendations, "Review operational failures",
+                "Inspect active errors and repeated command failures before retrying.",
+                RecommendationSeverity.Info);
     }
 
-    private static bool IsTemperatureMetric(string metric) =>
-        metric.Contains("temperature", StringComparison.OrdinalIgnoreCase)
-        || metric is "temp" or "temp_c" or "temp_f";
+    private static DateTime AsUtc(DateTime value) =>
+        value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+        };
 
-    private static bool IsBatteryMetric(string metric) =>
-        metric.Contains("battery", StringComparison.OrdinalIgnoreCase)
-        || metric.Contains("charge_level", StringComparison.OrdinalIgnoreCase);
+    private static DateTime AsUtc(DateTimeOffset value) =>
+        value.UtcDateTime;
 
-    private static bool IsSignalMetric(string metric) =>
-        metric.Contains("signal", StringComparison.OrdinalIgnoreCase)
-        || metric.Contains("rssi", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsHumidityMetric(string metric) =>
-        metric.Contains("humidity", StringComparison.OrdinalIgnoreCase)
-        || metric is "rh" or "relative_humidity";
-
-    private static bool ContainsAny(
-        string text,
-        params string[] terms) =>
-        terms.Any(term => text.Contains(
-            term,
-            StringComparison.OrdinalIgnoreCase));
-
-    private static string FormatValue(double value, string unit) =>
-        string.IsNullOrWhiteSpace(unit)
-            ? value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
-            : $"{value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)} {unit}";
-
-    private static string FormatAge(TimeSpan age)
+    private static Guid? ToDeviceId(object? value)
     {
-        if (age < TimeSpan.Zero)
-            return "less than a minute";
+        if (value is Guid id)
+            return id;
 
-        if (age.TotalDays >= 1)
-            return $"{(int)age.TotalDays}d {age.Hours}h";
+        if (value is string text && Guid.TryParse(text, out var parsed))
+            return parsed;
 
-        if (age.TotalHours >= 1)
-            return $"{(int)age.TotalHours}h {age.Minutes}m";
+        return null;
+    }
 
-        if (age.TotalMinutes >= 1)
-            return $"{(int)age.TotalMinutes}m";
-
-        return "less than a minute";
+    private static void Add(
+        ICollection<SmartXRecommendation> recommendations,
+        string title,
+        string description,
+        RecommendationSeverity severity,
+        object? deviceId = null)
+    {
+        recommendations.Add(new SmartXRecommendation
+        {
+            Title = title,
+            Description = description,
+            Severity = severity,
+            DeviceId = ToDeviceId(deviceId)
+        });
     }
 }
 
 public sealed class TelemetryObservation
 {
-    public string DeviceId { get; init; } = string.Empty;
+    public Guid DeviceId { get; init; }
 
     public string Metric { get; init; } = string.Empty;
 
@@ -430,31 +389,18 @@ public sealed class TelemetryObservation
 
     public string Unit { get; init; } = string.Empty;
 
-    public DateTimeOffset ObservedAt { get; init; } =
-        DateTimeOffset.UtcNow;
+    public DateTime ObservedAt { get; init; }
 }
 
 public sealed class SmartXRecommendation
 {
-    public SmartXRecommendation(
-        string title,
-        string description,
-        RecommendationSeverity severity,
-        string? deviceId = null)
-    {
-        Title = title;
-        Description = description;
-        Severity = severity;
-        DeviceId = deviceId ?? string.Empty;
-    }
+    public string Title { get; init; } = string.Empty;
 
-    public string Title { get; }
+    public string Description { get; init; } = string.Empty;
 
-    public string Description { get; }
+    public RecommendationSeverity Severity { get; init; }
 
-    public RecommendationSeverity Severity { get; }
-
-    public string DeviceId { get; }
+    public Guid? DeviceId { get; init; }
 }
 
 public enum RecommendationSeverity
