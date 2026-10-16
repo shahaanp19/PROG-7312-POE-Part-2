@@ -11,22 +11,25 @@ public sealed class CommandStateService
     private readonly ILogger<CommandStateService>? _logger;
 
     private readonly Queue<Guid> _fifoQueue = new();
+
     private readonly PriorityQueue<CommandRecord, (int Rank, long Sequence)>
         _priorityQueue = new();
+
     private readonly Stack<Guid> _undoStack = new();
 
-    // O(1) command lookup by command ID.
+    // O(1) command lookup by ID.
     private readonly Dictionary<Guid, CommandRecord> _recordsById = new();
 
-    // O(1) device lookup, with cached snapshots for repeated reads.
+    // Device indexes use case-insensitive keys.
     private readonly Dictionary<string, List<CommandRecord>> _commandsByDevice =
         new(StringComparer.OrdinalIgnoreCase);
 
+    // Read snapshots are created on demand and invalidated on insertion.
     private readonly Dictionary<string, IReadOnlyList<CommandRecord>>
         _deviceCommandCache =
             new(StringComparer.OrdinalIgnoreCase);
 
-    // Chronologically sorted indexes for efficient timeline queries.
+    // Sorted indexes support chronological history and bounded range queries.
     private readonly SortedSet<CommandRecord> _timeline =
         new(Comparer<CommandRecord>.Create(CompareTimelineRecords));
 
@@ -34,6 +37,7 @@ public sealed class CommandStateService
         new(Comparer<CommandAuditEntry>.Create(CompareAuditEntries));
 
     private readonly HashSet<Guid> _pendingIds = new();
+
     private readonly HashSet<string> _activeErrors =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -45,6 +49,9 @@ public sealed class CommandStateService
     private int _staleFifoEntries;
     private int _stalePriorityEntries;
     private int _staleUndoEntries;
+
+    private static readonly Guid MaximumGuid =
+        Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
 
     public CommandStateService(
         ILogger<CommandStateService>? logger = null)
@@ -69,7 +76,7 @@ public sealed class CommandStateService
     }
 
     /// <summary>
-    /// Returns the newest commands first using the sorted timeline index.
+    /// Returns all commands in newest-first chronological order.
     /// </summary>
     public IReadOnlyList<CommandRecord> History
     {
@@ -90,7 +97,7 @@ public sealed class CommandStateService
     }
 
     /// <summary>
-    /// Returns audit entries newest first.
+    /// Returns audit entries in newest-first chronological order.
     /// </summary>
     public IReadOnlyList<CommandAuditEntry> AuditLog
     {
@@ -141,6 +148,10 @@ public sealed class CommandStateService
         }
     }
 
+    /// <summary>
+    /// Adds a command to the FIFO queue, priority queue, undo stack,
+    /// command dictionary, device index and sorted timeline.
+    /// </summary>
     public CommandRecord Enqueue(
         string deviceId,
         string command,
@@ -192,21 +203,23 @@ public sealed class CommandStateService
 
             _undoStack.Push(record.Id);
 
-            // Maintain the sorted command timeline.
             _timeline.Add(record);
 
-            // Update the device index and its cached snapshot.
             if (!_commandsByDevice.TryGetValue(
                     normalizedDeviceId,
                     out var deviceCommands))
             {
                 deviceCommands = new List<CommandRecord>();
-                _commandsByDevice.Add(normalizedDeviceId, deviceCommands);
+                _commandsByDevice.Add(
+                    normalizedDeviceId,
+                    deviceCommands);
             }
 
             deviceCommands.Add(record);
-            _deviceCommandCache[normalizedDeviceId] =
-                deviceCommands.ToArray();
+
+            // Invalidate only this device's cached snapshot.
+            // Snapshot creation is deferred until the next read.
+            _deviceCommandCache.Remove(normalizedDeviceId);
 
             AddAuditEntry(
                 record,
@@ -215,6 +228,7 @@ public sealed class CommandStateService
         }
 
         NotifyStateChanged();
+
         return record;
     }
 
@@ -223,13 +237,17 @@ public sealed class CommandStateService
         string alertCommand,
         string? parameters = null)
     {
-        return Enqueue(deviceId, alertCommand, "Critical", parameters);
+        return Enqueue(
+            deviceId,
+            alertCommand,
+            "Critical",
+            parameters);
     }
 
     /// <summary>
     /// Processes the highest-priority pending command.
     /// Critical precedes High, which precedes Normal.
-    /// Equal-priority commands are processed FIFO.
+    /// Commands with equal priority are processed FIFO.
     /// </summary>
     public CommandRecord? ProcessNext()
     {
@@ -254,6 +272,7 @@ public sealed class CommandStateService
         }
 
         NotifyStateChanged();
+
         return processed;
     }
 
@@ -279,9 +298,15 @@ public sealed class CommandStateService
         }
 
         NotifyStateChanged();
+
         return processed;
     }
 
+    /// <summary>
+    /// Undoes the most recently submitted command that is still pending.
+    /// This removes the command from the logical queue; it does not reverse
+    /// any action already executed by a physical device.
+    /// </summary>
     public CommandRecord? UndoLast()
     {
         CommandRecord? undone = null;
@@ -329,6 +354,9 @@ public sealed class CommandStateService
         return undone;
     }
 
+    /// <summary>
+    /// Clears pending commands while preserving command history and audit data.
+    /// </summary>
     public int ClearQueue()
     {
         int cleared;
@@ -371,8 +399,9 @@ public sealed class CommandStateService
     }
 
     /// <summary>
-    /// Returns cached commands for a device using a case-insensitive
-    /// dictionary lookup.
+    /// Retrieves a cached snapshot of a device's commands.
+    /// The lookup is case-insensitive. The snapshot is rebuilt only when
+    /// the requested device's index has changed.
     /// </summary>
     public IReadOnlyList<CommandRecord> GetCommandsForDevice(
         string? deviceId)
@@ -384,16 +413,24 @@ public sealed class CommandStateService
         {
             var key = deviceId.Trim();
 
-            return _deviceCommandCache.TryGetValue(key, out var cached)
-                ? cached
-                : Array.Empty<CommandRecord>();
+            if (_deviceCommandCache.TryGetValue(key, out var cached))
+                return cached;
+
+            if (!_commandsByDevice.TryGetValue(key, out var commands))
+                return Array.Empty<CommandRecord>();
+
+            IReadOnlyList<CommandRecord> snapshot = commands.ToArray();
+
+            _deviceCommandCache[key] = snapshot;
+
+            return snapshot;
         }
     }
 
     /// <summary>
-    /// Returns commands in reverse chronological order within the
-    /// requested range. The sorted index limits the timeline entries
-    /// examined to the requested time range.
+    /// Retrieves commands newest first, optionally bounded by creation time,
+    /// device ID and result count.
+    /// The sorted index restricts traversal to the requested time range.
     /// </summary>
     public IReadOnlyList<CommandRecord> GetCommandTimeline(
         DateTimeOffset? from = null,
@@ -401,7 +438,9 @@ public sealed class CommandStateService
         string? deviceId = null,
         int? limit = null)
     {
-        if (from.HasValue && to.HasValue && from.Value > to.Value)
+        if (from.HasValue &&
+            to.HasValue &&
+            from.Value > to.Value)
         {
             throw new ArgumentException(
                 "The start time cannot be later than the end time.");
@@ -426,7 +465,7 @@ public sealed class CommandStateService
 
             var upperBound = CreateTimelineBoundary(
                 to ?? DateTimeOffset.MaxValue,
-                Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff"));
+                MaximumGuid);
 
             var range = _timeline.GetViewBetween(
                 lowerBound,
@@ -450,6 +489,9 @@ public sealed class CommandStateService
         }
     }
 
+    /// <summary>
+    /// Looks up a command by its unique identifier.
+    /// </summary>
     public bool TryGetCommand(
         Guid commandId,
         out CommandRecord? record)
@@ -562,7 +604,9 @@ public sealed class CommandStateService
         return null;
     }
 
-    private void InvalidateOtherEntries(Guid commandId, string mode)
+    private void InvalidateOtherEntries(
+        Guid commandId,
+        string mode)
     {
         if (mode == "priority")
             _staleFifoEntries++;
