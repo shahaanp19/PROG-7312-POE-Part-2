@@ -1,4 +1,5 @@
-﻿using System;
+﻿
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Extensions.Logging;
@@ -17,16 +18,13 @@ public sealed class CommandStateService
 
     private readonly Stack<Guid> _undoStack = new();
 
-    // Unique command records: O(1) average lookup by ID.
+    // Authoritative command store: unique IDs and O(1) average lookup.
     private readonly Dictionary<Guid, CommandRecord> _recordsById = new();
 
-    // Explicit unique-ID set prevents duplicate command registration.
-    private readonly HashSet<Guid> _knownCommandIds = new();
-
-    // Unique pending IDs support fast membership checks and removal.
+    // Tracks only commands currently pending in the queues.
     private readonly HashSet<Guid> _pendingIds = new();
 
-    // Unique active errors, using case-insensitive matching.
+    // Deduplicates active errors using case-insensitive matching.
     private readonly HashSet<string> _activeErrors =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -38,7 +36,6 @@ public sealed class CommandStateService
         _deviceCommandCache =
             new(StringComparer.OrdinalIgnoreCase);
 
-    // SortedSet uses the comparator to prevent duplicate index entries.
     private readonly SortedSet<CommandRecord> _timeline =
         new(Comparer<CommandRecord>.Create(CompareTimelineRecords));
 
@@ -133,12 +130,13 @@ public sealed class CommandStateService
         }
     }
 
+    // The record dictionary is the authoritative unique-command collection.
     public int UniqueCommandCount
     {
         get
         {
             lock (_sync)
-                return _knownCommandIds.Count;
+                return _recordsById.Count;
         }
     }
 
@@ -158,13 +156,89 @@ public sealed class CommandStateService
     public bool ContainsCommand(Guid commandId)
     {
         lock (_sync)
-            return _knownCommandIds.Contains(commandId);
+            return _recordsById.ContainsKey(commandId);
     }
 
     public bool IsCommandPending(Guid commandId)
     {
         lock (_sync)
             return _pendingIds.Contains(commandId);
+    }
+
+    /// <summary>
+    /// Validates the collection invariants while holding the state lock.
+    /// Intended for diagnostics and automated consistency tests.
+    /// </summary>
+    public bool ValidateCollectionConsistency(out string details)
+    {
+        lock (_sync)
+        {
+            foreach (var pair in _recordsById)
+            {
+                if (pair.Key != pair.Value.Id)
+                {
+                    details = $"Record key mismatch for command {pair.Key}.";
+                    return false;
+                }
+            }
+
+            foreach (var id in _pendingIds)
+            {
+                if (!_recordsById.ContainsKey(id))
+                {
+                    details = $"Pending command {id} has no registered record.";
+                    return false;
+                }
+            }
+
+            if (_timeline.Count != _recordsById.Count)
+            {
+                details =
+                    $"Timeline count ({_timeline.Count}) does not match " +
+                    $"record count ({_recordsById.Count}).";
+                return false;
+            }
+
+            foreach (var record in _recordsById.Values)
+            {
+                if (!_timeline.Contains(record))
+                {
+                    details =
+                        $"Command {record.Id} is missing from the timeline.";
+                    return false;
+                }
+            }
+
+            if (_pendingIds.Any(id =>
+                    !_fifoQueue.Contains(id)))
+            {
+                details =
+                    "A pending command is missing from the FIFO queue.";
+                return false;
+            }
+
+            if (_pendingIds.Any(id =>
+                    !_priorityQueue.UnorderedItems.Any(
+                        item => item.Element.Id == id)))
+            {
+                details =
+                    "A pending command is missing from the priority queue.";
+                return false;
+            }
+
+            if (_pendingIds.Any(id => !_undoStack.Contains(id)))
+            {
+                details =
+                    "A pending command is missing from the undo stack.";
+                return false;
+            }
+
+            details =
+                "Collection invariants passed: command records, timeline, " +
+                "pending set, FIFO queue, priority queue, and undo stack agree.";
+
+            return true;
+        }
     }
 
     public CommandRecord Enqueue(
@@ -207,16 +281,11 @@ public sealed class CommandStateService
 
         lock (_sync)
         {
-            // The generated GUID must be unique across all registered records.
-            if (!_knownCommandIds.Add(record.Id))
-            {
-                throw new InvalidOperationException(
-                    $"Duplicate command ID detected: {record.Id}");
-            }
-
+            // Dictionary.Add rejects duplicate IDs; records remain in history
+            // after processing, undo, or queue clearance.
             _recordsById.Add(record.Id, record);
-            _pendingIds.Add(record.Id);
 
+            _pendingIds.Add(record.Id);
             _fifoQueue.Enqueue(record.Id);
 
             _priorityQueue.Enqueue(
@@ -231,15 +300,10 @@ public sealed class CommandStateService
                     out var deviceCommands))
             {
                 deviceCommands = new List<CommandRecord>();
-
-                _commandsByDevice.Add(
-                    normalizedDeviceId,
-                    deviceCommands);
+                _commandsByDevice.Add(normalizedDeviceId, deviceCommands);
             }
 
             deviceCommands.Add(record);
-
-            // Invalidate only the changed device's cached snapshot.
             _deviceCommandCache.Remove(normalizedDeviceId);
 
             AddAuditEntry(
@@ -249,7 +313,6 @@ public sealed class CommandStateService
         }
 
         NotifyStateChanged();
-
         return record;
     }
 
@@ -258,11 +321,7 @@ public sealed class CommandStateService
         string alertCommand,
         string? parameters = null)
     {
-        return Enqueue(
-            deviceId,
-            alertCommand,
-            "Critical",
-            parameters);
+        return Enqueue(deviceId, alertCommand, "Critical", parameters);
     }
 
     public CommandRecord? ProcessNext()
@@ -287,7 +346,6 @@ public sealed class CommandStateService
         }
 
         NotifyStateChanged();
-
         return processed;
     }
 
@@ -308,7 +366,6 @@ public sealed class CommandStateService
         }
 
         NotifyStateChanged();
-
         return processed;
     }
 
@@ -417,7 +474,6 @@ public sealed class CommandStateService
                 return Array.Empty<CommandRecord>();
 
             IReadOnlyList<CommandRecord> snapshot = commands.ToArray();
-
             _deviceCommandCache[key] = snapshot;
 
             return snapshot;
@@ -430,9 +486,7 @@ public sealed class CommandStateService
         string? deviceId = null,
         int? limit = null)
     {
-        if (from.HasValue &&
-            to.HasValue &&
-            from.Value > to.Value)
+        if (from.HasValue && to.HasValue && from.Value > to.Value)
         {
             throw new ArgumentException(
                 "The start time cannot be later than the end time.");
@@ -459,10 +513,7 @@ public sealed class CommandStateService
                 to ?? DateTimeOffset.MaxValue,
                 MaximumGuid);
 
-            var range = _timeline.GetViewBetween(
-                lowerBound,
-                upperBound);
-
+            var range = _timeline.GetViewBetween(lowerBound, upperBound);
             IEnumerable<CommandRecord> results = range.Reverse();
 
             if (deviceFilter is not null)
@@ -499,7 +550,6 @@ public sealed class CommandStateService
 
         lock (_sync)
         {
-            // HashSet.Add returns false for a duplicate error key.
             added = _activeErrors.Add(key);
 
             if (added)
@@ -526,7 +576,6 @@ public sealed class CommandStateService
 
         lock (_sync)
         {
-            // HashSet.Remove returns false if the error is not active.
             removed = _activeErrors.Remove(key);
 
             if (removed)
