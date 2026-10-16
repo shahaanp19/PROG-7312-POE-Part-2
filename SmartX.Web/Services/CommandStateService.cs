@@ -1,5 +1,4 @@
-﻿
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Extensions.Logging;
@@ -16,12 +15,23 @@ public sealed class CommandStateService
         _priorityQueue = new();
     private readonly Stack<Guid> _undoStack = new();
 
+    // O(1) command lookup by command ID.
     private readonly Dictionary<Guid, CommandRecord> _recordsById = new();
+
+    // O(1) device lookup, with cached snapshots for repeated reads.
     private readonly Dictionary<string, List<CommandRecord>> _commandsByDevice =
         new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly List<CommandRecord> _history = new();
-    private readonly List<CommandAuditEntry> _auditLog = new();
+    private readonly Dictionary<string, IReadOnlyList<CommandRecord>>
+        _deviceCommandCache =
+            new(StringComparer.OrdinalIgnoreCase);
+
+    // Chronologically sorted indexes for efficient timeline queries.
+    private readonly SortedSet<CommandRecord> _timeline =
+        new(Comparer<CommandRecord>.Create(CompareTimelineRecords));
+
+    private readonly SortedSet<CommandAuditEntry> _auditTimeline =
+        new(Comparer<CommandAuditEntry>.Create(CompareAuditEntries));
 
     private readonly HashSet<Guid> _pendingIds = new();
     private readonly HashSet<string> _activeErrors =
@@ -58,12 +68,15 @@ public sealed class CommandStateService
         }
     }
 
+    /// <summary>
+    /// Returns the newest commands first using the sorted timeline index.
+    /// </summary>
     public IReadOnlyList<CommandRecord> History
     {
         get
         {
             lock (_sync)
-                return _history.ToArray();
+                return _timeline.Reverse().ToArray();
         }
     }
 
@@ -76,16 +89,15 @@ public sealed class CommandStateService
         }
     }
 
+    /// <summary>
+    /// Returns audit entries newest first.
+    /// </summary>
     public IReadOnlyList<CommandAuditEntry> AuditLog
     {
         get
         {
             lock (_sync)
-            {
-                return _auditLog
-                    .OrderByDescending(entry => entry.Sequence)
-                    .ToArray();
-            }
+                return _auditTimeline.Reverse().ToArray();
         }
     }
 
@@ -103,7 +115,7 @@ public sealed class CommandStateService
         get
         {
             lock (_sync)
-                return _history.Count;
+                return _timeline.Count;
         }
     }
 
@@ -136,12 +148,18 @@ public sealed class CommandStateService
         string? parameters = null)
     {
         if (string.IsNullOrWhiteSpace(deviceId))
+        {
             throw new ArgumentException(
-                "A device ID is required.", nameof(deviceId));
+                "A device ID is required.",
+                nameof(deviceId));
+        }
 
         if (string.IsNullOrWhiteSpace(command))
+        {
             throw new ArgumentException(
-                "A command is required.", nameof(command));
+                "A command is required.",
+                nameof(command));
+        }
 
         var normalizedDeviceId = deviceId.Trim();
         var normalizedCommand = command.Trim();
@@ -173,8 +191,11 @@ public sealed class CommandStateService
                 (GetPriorityRank(record.Priority), _prioritySequence++));
 
             _undoStack.Push(record.Id);
-            _history.Insert(0, record);
 
+            // Maintain the sorted command timeline.
+            _timeline.Add(record);
+
+            // Update the device index and its cached snapshot.
             if (!_commandsByDevice.TryGetValue(
                     normalizedDeviceId,
                     out var deviceCommands))
@@ -184,6 +205,8 @@ public sealed class CommandStateService
             }
 
             deviceCommands.Add(record);
+            _deviceCommandCache[normalizedDeviceId] =
+                deviceCommands.ToArray();
 
             AddAuditEntry(
                 record,
@@ -205,8 +228,8 @@ public sealed class CommandStateService
 
     /// <summary>
     /// Processes the highest-priority pending command.
-    /// Priority order: Critical, High, Normal.
-    /// Commands of equal priority are processed FIFO.
+    /// Critical precedes High, which precedes Normal.
+    /// Equal-priority commands are processed FIFO.
     /// </summary>
     public CommandRecord? ProcessNext()
     {
@@ -235,8 +258,8 @@ public sealed class CommandStateService
     }
 
     /// <summary>
-    /// Explicit FIFO processing, independent of command priority.
-    /// Use ProcessNext() for priority-aware scheduling.
+    /// Processes the next pending command in FIFO order,
+    /// regardless of priority.
     /// </summary>
     public CommandRecord? ProcessNextFifo()
     {
@@ -347,6 +370,10 @@ public sealed class CommandStateService
         return cleared;
     }
 
+    /// <summary>
+    /// Returns cached commands for a device using a case-insensitive
+    /// dictionary lookup.
+    /// </summary>
     public IReadOnlyList<CommandRecord> GetCommandsForDevice(
         string? deviceId)
     {
@@ -355,11 +382,71 @@ public sealed class CommandStateService
 
         lock (_sync)
         {
-            return _commandsByDevice.TryGetValue(
-                    deviceId.Trim(),
-                    out var commands)
-                ? commands.ToArray()
+            var key = deviceId.Trim();
+
+            return _deviceCommandCache.TryGetValue(key, out var cached)
+                ? cached
                 : Array.Empty<CommandRecord>();
+        }
+    }
+
+    /// <summary>
+    /// Returns commands in reverse chronological order within the
+    /// requested range. The sorted index limits the timeline entries
+    /// examined to the requested time range.
+    /// </summary>
+    public IReadOnlyList<CommandRecord> GetCommandTimeline(
+        DateTimeOffset? from = null,
+        DateTimeOffset? to = null,
+        string? deviceId = null,
+        int? limit = null)
+    {
+        if (from.HasValue && to.HasValue && from.Value > to.Value)
+        {
+            throw new ArgumentException(
+                "The start time cannot be later than the end time.");
+        }
+
+        if (limit.HasValue && limit.Value < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(limit),
+                "The limit must be greater than zero.");
+        }
+
+        var deviceFilter = string.IsNullOrWhiteSpace(deviceId)
+            ? null
+            : deviceId.Trim();
+
+        lock (_sync)
+        {
+            var lowerBound = CreateTimelineBoundary(
+                from ?? DateTimeOffset.MinValue,
+                Guid.Empty);
+
+            var upperBound = CreateTimelineBoundary(
+                to ?? DateTimeOffset.MaxValue,
+                Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff"));
+
+            var range = _timeline.GetViewBetween(
+                lowerBound,
+                upperBound);
+
+            IEnumerable<CommandRecord> results = range.Reverse();
+
+            if (deviceFilter is not null)
+            {
+                results = results.Where(record =>
+                    string.Equals(
+                        record.DeviceId,
+                        deviceFilter,
+                        StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (limit.HasValue)
+                results = results.Take(limit.Value);
+
+            return results.ToArray();
         }
     }
 
@@ -431,8 +518,8 @@ public sealed class CommandStateService
 
         lock (_sync)
         {
-            changed = _auditLog.Count > 0;
-            _auditLog.Clear();
+            changed = _auditTimeline.Count > 0;
+            _auditTimeline.Clear();
         }
 
         if (changed)
@@ -532,7 +619,11 @@ public sealed class CommandStateService
             _priorityQueue.Clear();
 
             foreach (var item in activeEntries)
-                _priorityQueue.Enqueue(item.Record, item.Priority);
+            {
+                _priorityQueue.Enqueue(
+                    item.Record,
+                    item.Priority);
+            }
 
             _stalePriorityEntries = 0;
         }
@@ -558,7 +649,7 @@ public sealed class CommandStateService
         string details,
         string? errorKey = null)
     {
-        _auditLog.Add(new CommandAuditEntry
+        var entry = new CommandAuditEntry
         {
             Sequence = _auditSequence++,
             Timestamp = DateTimeOffset.UtcNow,
@@ -568,7 +659,62 @@ public sealed class CommandStateService
             Action = action,
             Details = details,
             ErrorKey = errorKey
-        });
+        };
+
+        _auditTimeline.Add(entry);
+    }
+
+    private static CommandRecord CreateTimelineBoundary(
+        DateTimeOffset timestamp,
+        Guid id)
+    {
+        return new CommandRecord
+        {
+            CreatedAt = timestamp,
+            Id = id
+        };
+    }
+
+    private static int CompareTimelineRecords(
+        CommandRecord? left,
+        CommandRecord? right)
+    {
+        if (ReferenceEquals(left, right))
+            return 0;
+
+        if (left is null)
+            return -1;
+
+        if (right is null)
+            return 1;
+
+        var timestampComparison =
+            left.CreatedAt.CompareTo(right.CreatedAt);
+
+        return timestampComparison != 0
+            ? timestampComparison
+            : left.Id.CompareTo(right.Id);
+    }
+
+    private static int CompareAuditEntries(
+        CommandAuditEntry? left,
+        CommandAuditEntry? right)
+    {
+        if (ReferenceEquals(left, right))
+            return 0;
+
+        if (left is null)
+            return -1;
+
+        if (right is null)
+            return 1;
+
+        var timestampComparison =
+            left.Timestamp.CompareTo(right.Timestamp);
+
+        return timestampComparison != 0
+            ? timestampComparison
+            : left.Sequence.CompareTo(right.Sequence);
     }
 
     private static string NormalizePriority(string? priority) =>
