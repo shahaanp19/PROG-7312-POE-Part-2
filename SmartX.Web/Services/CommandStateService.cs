@@ -17,29 +17,33 @@ public sealed class CommandStateService
 
     private readonly Stack<Guid> _undoStack = new();
 
-    // O(1) command lookup by ID.
+    // Unique command records: O(1) average lookup by ID.
     private readonly Dictionary<Guid, CommandRecord> _recordsById = new();
 
-    // Device indexes use case-insensitive keys.
+    // Explicit unique-ID set prevents duplicate command registration.
+    private readonly HashSet<Guid> _knownCommandIds = new();
+
+    // Unique pending IDs support fast membership checks and removal.
+    private readonly HashSet<Guid> _pendingIds = new();
+
+    // Unique active errors, using case-insensitive matching.
+    private readonly HashSet<string> _activeErrors =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    // Per-device indexes use case-insensitive keys.
     private readonly Dictionary<string, List<CommandRecord>> _commandsByDevice =
         new(StringComparer.OrdinalIgnoreCase);
 
-    // Read snapshots are created on demand and invalidated on insertion.
     private readonly Dictionary<string, IReadOnlyList<CommandRecord>>
         _deviceCommandCache =
             new(StringComparer.OrdinalIgnoreCase);
 
-    // Sorted indexes support chronological history and bounded range queries.
+    // SortedSet uses the comparator to prevent duplicate index entries.
     private readonly SortedSet<CommandRecord> _timeline =
         new(Comparer<CommandRecord>.Create(CompareTimelineRecords));
 
     private readonly SortedSet<CommandAuditEntry> _auditTimeline =
         new(Comparer<CommandAuditEntry>.Create(CompareAuditEntries));
-
-    private readonly HashSet<Guid> _pendingIds = new();
-
-    private readonly HashSet<string> _activeErrors =
-        new(StringComparer.OrdinalIgnoreCase);
 
     private long _prioritySequence;
     private long _auditSequence;
@@ -75,9 +79,6 @@ public sealed class CommandStateService
         }
     }
 
-    /// <summary>
-    /// Returns all commands in newest-first chronological order.
-    /// </summary>
     public IReadOnlyList<CommandRecord> History
     {
         get
@@ -96,9 +97,6 @@ public sealed class CommandStateService
         }
     }
 
-    /// <summary>
-    /// Returns audit entries in newest-first chronological order.
-    /// </summary>
     public IReadOnlyList<CommandAuditEntry> AuditLog
     {
         get
@@ -135,6 +133,15 @@ public sealed class CommandStateService
         }
     }
 
+    public int UniqueCommandCount
+    {
+        get
+        {
+            lock (_sync)
+                return _knownCommandIds.Count;
+        }
+    }
+
     public int CriticalQueueCount
     {
         get
@@ -148,10 +155,18 @@ public sealed class CommandStateService
         }
     }
 
-    /// <summary>
-    /// Adds a command to the FIFO queue, priority queue, undo stack,
-    /// command dictionary, device index and sorted timeline.
-    /// </summary>
+    public bool ContainsCommand(Guid commandId)
+    {
+        lock (_sync)
+            return _knownCommandIds.Contains(commandId);
+    }
+
+    public bool IsCommandPending(Guid commandId)
+    {
+        lock (_sync)
+            return _pendingIds.Contains(commandId);
+    }
+
     public CommandRecord Enqueue(
         string deviceId,
         string command,
@@ -192,6 +207,13 @@ public sealed class CommandStateService
 
         lock (_sync)
         {
+            // The generated GUID must be unique across all registered records.
+            if (!_knownCommandIds.Add(record.Id))
+            {
+                throw new InvalidOperationException(
+                    $"Duplicate command ID detected: {record.Id}");
+            }
+
             _recordsById.Add(record.Id, record);
             _pendingIds.Add(record.Id);
 
@@ -202,7 +224,6 @@ public sealed class CommandStateService
                 (GetPriorityRank(record.Priority), _prioritySequence++));
 
             _undoStack.Push(record.Id);
-
             _timeline.Add(record);
 
             if (!_commandsByDevice.TryGetValue(
@@ -210,6 +231,7 @@ public sealed class CommandStateService
                     out var deviceCommands))
             {
                 deviceCommands = new List<CommandRecord>();
+
                 _commandsByDevice.Add(
                     normalizedDeviceId,
                     deviceCommands);
@@ -217,8 +239,7 @@ public sealed class CommandStateService
 
             deviceCommands.Add(record);
 
-            // Invalidate only this device's cached snapshot.
-            // Snapshot creation is deferred until the next read.
+            // Invalidate only the changed device's cached snapshot.
             _deviceCommandCache.Remove(normalizedDeviceId);
 
             AddAuditEntry(
@@ -244,11 +265,6 @@ public sealed class CommandStateService
             parameters);
     }
 
-    /// <summary>
-    /// Processes the highest-priority pending command.
-    /// Critical precedes High, which precedes Normal.
-    /// Commands with equal priority are processed FIFO.
-    /// </summary>
     public CommandRecord? ProcessNext()
     {
         return ProcessHighestPriority();
@@ -265,8 +281,7 @@ public sealed class CommandStateService
             if (processed is null)
                 return null;
 
-            InvalidateOtherEntries(processed.Id, "priority");
-
+            InvalidateOtherEntries("priority");
             MarkProcessed(processed, "priority scheduling");
             CompactStaleCollections();
         }
@@ -276,10 +291,6 @@ public sealed class CommandStateService
         return processed;
     }
 
-    /// <summary>
-    /// Processes the next pending command in FIFO order,
-    /// regardless of priority.
-    /// </summary>
     public CommandRecord? ProcessNextFifo()
     {
         CommandRecord? processed;
@@ -291,8 +302,7 @@ public sealed class CommandStateService
             if (processed is null)
                 return null;
 
-            InvalidateOtherEntries(processed.Id, "fifo");
-
+            InvalidateOtherEntries("fifo");
             MarkProcessed(processed, "FIFO");
             CompactStaleCollections();
         }
@@ -302,11 +312,6 @@ public sealed class CommandStateService
         return processed;
     }
 
-    /// <summary>
-    /// Undoes the most recently submitted command that is still pending.
-    /// This removes the command from the logical queue; it does not reverse
-    /// any action already executed by a physical device.
-    /// </summary>
     public CommandRecord? UndoLast()
     {
         CommandRecord? undone = null;
@@ -354,9 +359,6 @@ public sealed class CommandStateService
         return undone;
     }
 
-    /// <summary>
-    /// Clears pending commands while preserving command history and audit data.
-    /// </summary>
     public int ClearQueue()
     {
         int cleared;
@@ -398,11 +400,6 @@ public sealed class CommandStateService
         return cleared;
     }
 
-    /// <summary>
-    /// Retrieves a cached snapshot of a device's commands.
-    /// The lookup is case-insensitive. The snapshot is rebuilt only when
-    /// the requested device's index has changed.
-    /// </summary>
     public IReadOnlyList<CommandRecord> GetCommandsForDevice(
         string? deviceId)
     {
@@ -427,11 +424,6 @@ public sealed class CommandStateService
         }
     }
 
-    /// <summary>
-    /// Retrieves commands newest first, optionally bounded by creation time,
-    /// device ID and result count.
-    /// The sorted index restricts traversal to the requested time range.
-    /// </summary>
     public IReadOnlyList<CommandRecord> GetCommandTimeline(
         DateTimeOffset? from = null,
         DateTimeOffset? to = null,
@@ -489,9 +481,6 @@ public sealed class CommandStateService
         }
     }
 
-    /// <summary>
-    /// Looks up a command by its unique identifier.
-    /// </summary>
     public bool TryGetCommand(
         Guid commandId,
         out CommandRecord? record)
@@ -510,6 +499,7 @@ public sealed class CommandStateService
 
         lock (_sync)
         {
+            // HashSet.Add returns false for a duplicate error key.
             added = _activeErrors.Add(key);
 
             if (added)
@@ -536,6 +526,7 @@ public sealed class CommandStateService
 
         lock (_sync)
         {
+            // HashSet.Remove returns false if the error is not active.
             removed = _activeErrors.Remove(key);
 
             if (removed)
@@ -604,9 +595,7 @@ public sealed class CommandStateService
         return null;
     }
 
-    private void InvalidateOtherEntries(
-        Guid commandId,
-        string mode)
+    private void InvalidateOtherEntries(string mode)
     {
         if (mode == "priority")
             _staleFifoEntries++;
@@ -693,7 +682,7 @@ public sealed class CommandStateService
         string details,
         string? errorKey = null)
     {
-        var entry = new CommandAuditEntry
+        _auditTimeline.Add(new CommandAuditEntry
         {
             Sequence = _auditSequence++,
             Timestamp = DateTimeOffset.UtcNow,
@@ -703,9 +692,7 @@ public sealed class CommandStateService
             Action = action,
             Details = details,
             ErrorKey = errorKey
-        };
-
-        _auditTimeline.Add(entry);
+        });
     }
 
     private static CommandRecord CreateTimelineBoundary(

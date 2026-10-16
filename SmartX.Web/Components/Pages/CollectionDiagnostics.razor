@@ -10,7 +10,11 @@
         <div>
             <span class="eyebrow">PART 2 / ADVANCED COLLECTIONS</span>
             <h1>Collection &amp; Lookup Diagnostics</h1>
-            <p>Validate dictionary-based device caching, sorted command timelines, priority scheduling, FIFO processing, LIFO undo, and collection consistency.</p>
+            <p>
+                Validate unique command tracking, pending-command membership,
+                duplicate-error prevention, dictionary lookups, sorted timelines,
+                priority scheduling, FIFO processing, and LIFO undo.
+            </p>
         </div>
         <a class="back-link" href="/commands">← Command Stream</a>
     </header>
@@ -39,7 +43,10 @@
     <section class="panel">
         <div class="panel-heading">
             <h2>Automated Collection Tests</h2>
-            <p>Tests execute against isolated CommandStateService instances without modifying the live command queue.</p>
+            <p>
+                Tests execute against isolated CommandStateService instances
+                without modifying the live command queue.
+            </p>
         </div>
 
         <div class="actions">
@@ -60,7 +67,10 @@
         {
             <div class="empty-state">
                 <strong>Diagnostics have not been run</strong>
-                <p>Run the automated checks to verify collection behavior and indexed lookup operations.</p>
+                <p>
+                    Run the automated checks to verify unique tracking,
+                    collection consistency, and indexed lookup operations.
+                </p>
             </div>
         }
         else if (_results.Count == 0)
@@ -105,12 +115,19 @@
                 @if (_allPassed)
                 {
                     <strong>All collection diagnostics passed.</strong>
-                    <p>Every executed check passed. Review individual results for lookup, timeline, ordering, and workload evidence.</p>
+                    <p>
+                        Every executed check passed. Review the results for
+                        set membership, duplicate prevention, lookup efficiency,
+                        timeline ordering, and workload evidence.
+                    </p>
                 }
                 else
                 {
                     <strong>One or more diagnostics failed.</strong>
-                    <p>Inspect the failed test details and correct the underlying collection behavior.</p>
+                    <p>
+                        Inspect the failed test details and correct the
+                        underlying collection behavior.
+                    </p>
                 }
             </div>
         }
@@ -118,50 +135,154 @@
 
     <section class="panel">
         <div class="panel-heading">
+            <h2>Unique Collections: Sets</h2>
+            <p>
+                Hash-based membership tracking prevents duplicate entries
+                and supports efficient uniqueness and membership checks.
+            </p>
+        </div>
+
+        <div class="evidence-grid">
+            <article class="evidence-card">
+                <span class="evidence-icon">01</span>
+                <h3>Unique Command Tracking</h3>
+                <p>
+                    Tracks command identifiers in a HashSet so each command
+                    ID is recorded once. Historical IDs remain tracked after
+                    commands are processed or the pending queue is cleared.
+                </p>
+                <code>HashSet&lt;Guid&gt; _knownCommandIds</code>
+            </article>
+
+            <article class="evidence-card">
+                <span class="evidence-icon">02</span>
+                <h3>Pending Command Membership</h3>
+                <p>
+                    Maintains a separate set of pending command IDs. Processing,
+                    undo, and queue clearing update membership without requiring
+                    a full scan of the pending queue.
+                </p>
+                <code>HashSet&lt;Guid&gt; _pendingIds</code>
+            </article>
+
+            <article class="evidence-card">
+                <span class="evidence-icon">03</span>
+                <h3>Duplicate Active-Error Prevention</h3>
+                <p>
+                    Uses case-insensitive membership to avoid storing duplicate
+                    active error messages with different letter casing.
+                    Resolved errors can be removed from the set.
+                </p>
+                <code>HashSet&lt;string&gt; _activeErrors</code>
+            </article>
+
+            <article class="evidence-card">
+                <span class="evidence-icon">04</span>
+                <h3>Set Consistency Diagnostics</h3>
+                <p>
+                    Automated checks validate unique command counts,
+                    pending-state transitions, case-insensitive error
+                    deduplication, and set membership after queue clearing.
+                </p>
+                <code>CommandCollectionDiagnostics.RunAll()</code>
+            </article>
+        </div>
+
+        <div class="set-complexity">
+            <h3>Expected Set Operation Costs</h3>
+            <div class="complexity-grid">
+                <div>
+                    <strong>Average O(1)</strong>
+                    <span>Add an item</span>
+                </div>
+                <div>
+                    <strong>Average O(1)</strong>
+                    <span>Check membership</span>
+                </div>
+                <div>
+                    <strong>Average O(1)</strong>
+                    <span>Remove an item</span>
+                </div>
+            </div>
+            <p>
+                These are expected average-case costs for hash-based sets,
+                not worst-case guarantees. Performance depends on hashing,
+                collisions, and resizing.
+            </p>
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="panel-heading">
             <h2>Dictionary &amp; Sorted Timeline Evidence</h2>
-            <p>Collection structures used to reduce lookup and timeline retrieval overhead.</p>
+            <p>
+                Collection structures used to reduce lookup and timeline
+                retrieval overhead.
+            </p>
         </div>
 
         <div class="evidence-grid">
             <article class="evidence-card">
                 <span class="evidence-icon">01</span>
                 <h3>Dictionary-Based Device Index</h3>
-                <p>Maps device identifiers to their command records, enabling direct key-based lookup instead of scanning the entire history.</p>
+                <p>
+                    Maps device identifiers to their command records,
+                    enabling direct key-based lookup instead of scanning
+                    the entire history.
+                </p>
                 <code>Dictionary&lt;string, ...&gt;</code>
             </article>
 
             <article class="evidence-card">
                 <span class="evidence-icon">02</span>
                 <h3>Cached Device Results</h3>
-                <p>Maintains device-specific command snapshots and updates them when commands are added, reducing repeated lookup and projection work.</p>
+                <p>
+                    Maintains device-specific command snapshots and updates
+                    them when commands are added, reducing repeated lookup
+                    and projection work.
+                </p>
                 <code>GetCommandsForDevice()</code>
             </article>
 
             <article class="evidence-card">
                 <span class="evidence-icon">03</span>
                 <h3>Sorted Command Timeline</h3>
-                <p>Maintains chronological command ordering with a deterministic identifier tie-breaker for records with matching timestamps.</p>
+                <p>
+                    Maintains chronological command ordering with a
+                    deterministic identifier tie-breaker for records
+                    with matching timestamps.
+                </p>
                 <code>SortedSet&lt;CommandRecord&gt;</code>
             </article>
 
             <article class="evidence-card">
                 <span class="evidence-icon">04</span>
                 <h3>Bounded Timeline Queries</h3>
-                <p>Supports date-range filtering, device filtering, newest-first retrieval, and result limits through the indexed timeline API.</p>
+                <p>
+                    Supports date-range filtering, device filtering,
+                    newest-first retrieval, and result limits through
+                    the indexed timeline API.
+                </p>
                 <code>GetCommandTimeline()</code>
             </article>
 
             <article class="evidence-card">
                 <span class="evidence-icon">05</span>
                 <h3>Sorted Audit Events</h3>
-                <p>Maintains audit entries in chronological order using timestamps and sequence numbers for deterministic ordering.</p>
+                <p>
+                    Maintains audit entries in chronological order using
+                    timestamps and sequence numbers for deterministic ordering.
+                </p>
                 <code>SortedSet&lt;CommandAuditEntry&gt;</code>
             </article>
 
             <article class="evidence-card">
                 <span class="evidence-icon">06</span>
                 <h3>Workload Diagnostics</h3>
-                <p>Exercises repeated device lookups and timeline queries over a larger collection to capture execution timings.</p>
+                <p>
+                    Exercises repeated device lookups and timeline queries
+                    over a larger collection to capture execution timings.
+                </p>
                 <code>Indexed lookup workload</code>
             </article>
         </div>
@@ -176,31 +297,46 @@
         <ul class="evidence-list">
             <li>
                 <strong>FIFO Queue</strong>
-                <span>Verifies submission order during standard command processing.</span>
+                <span>
+                    Verifies submission order during standard command processing.
+                </span>
             </li>
             <li>
                 <strong>Priority Queue</strong>
-                <span>Verifies Critical, High, and Normal scheduling, including ordering within equal priorities.</span>
+                <span>
+                    Verifies Critical, High, and Normal scheduling,
+                    including ordering within equal priorities.
+                </span>
             </li>
             <li>
                 <strong>LIFO Stack</strong>
-                <span>Verifies undo behavior for the newest eligible pending command.</span>
+                <span>
+                    Verifies undo behavior for the newest eligible pending command.
+                </span>
             </li>
             <li>
                 <strong>Audit Trail</strong>
-                <span>Verifies timestamped records for command submissions, processing, undo, and error changes.</span>
+                <span>
+                    Verifies timestamped records for command submissions,
+                    processing, undo, and error changes.
+                </span>
             </li>
             <li>
                 <strong>Concurrency &amp; Consistency</strong>
-                <span>Exercises repeated and concurrent operations while checking collection consistency.</span>
+                <span>
+                    Exercises repeated and concurrent operations while
+                    checking collection consistency.
+                </span>
             </li>
         </ul>
     </section>
 
     <p class="disclaimer">
-        Execution times depend on the current runtime and workload. These diagnostics provide test evidence,
-        not a guarantee of constant-time performance. Records are maintained in application memory;
-        command processing does not execute physical device operations.
+        Execution times depend on the current runtime and workload. HashSet
+        operations have expected average-case constant-time performance.
+        These diagnostics provide test evidence, not a guarantee of constant-time
+        performance. Records are maintained in application memory; command
+        processing does not execute physical device operations.
     </p>
 </div>
 
@@ -527,6 +663,54 @@
         overflow-wrap: anywhere;
     }
 
+    .set-complexity {
+        margin: 0 22px 22px;
+        padding: 18px;
+        border: 1px solid #dce7fb;
+        border-radius: 8px;
+        background: #f7f9ff;
+    }
+
+        .set-complexity h3 {
+            margin: 0 0 14px;
+            color: #243956;
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+    .complexity-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+    }
+
+        .complexity-grid div {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            padding: 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            background: white;
+        }
+
+        .complexity-grid strong {
+            color: #285fca;
+            font-size: 13px;
+        }
+
+        .complexity-grid span {
+            color: #718096;
+            font-size: 11px;
+        }
+
+    .set-complexity > p {
+        margin: 13px 0 0;
+        color: #718096;
+        font-size: 11px;
+        line-height: 1.6;
+    }
+
     .evidence-list {
         display: grid;
         gap: 0;
@@ -600,8 +784,14 @@
             padding: 16px;
         }
 
-        .result-summary {
-            margin: 0 16px 16px;
+        .result-summary,
+        .set-complexity {
+            margin-right: 16px;
+            margin-left: 16px;
+        }
+
+        .complexity-grid {
+            grid-template-columns: 1fr;
         }
     }
 </style>

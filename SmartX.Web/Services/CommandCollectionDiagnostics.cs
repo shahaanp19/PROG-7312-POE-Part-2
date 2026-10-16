@@ -1,4 +1,5 @@
-﻿using System;
+﻿
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -25,6 +26,7 @@ public static class CommandCollectionDiagnostics
             Run("Undo skips processed commands", TestUndoSkipsProcessed),
             Run("Critical alert ingestion", TestCriticalAlertIngestion),
             Run("Queue clearing preserves history", TestClearQueue),
+
             Run("Device dictionary lookup", TestDeviceIndex),
             Run("Device cache updates after insertion", TestDeviceCacheUpdates),
             Run("Sorted timeline ordering", TestTimelineOrdering),
@@ -33,6 +35,15 @@ public static class CommandCollectionDiagnostics
             Run("Timeline result limit", TestTimelineLimit),
             Run("Audit trail ordering", TestAuditTrail),
             Run("Audit log clearing", TestClearAuditLog),
+
+            // Unique Collections: Sets
+            Run("HashSet unique command tracking", TestUniqueCommandTracking),
+            Run("HashSet pending membership lifecycle", TestPendingSetLifecycle),
+            Run("Duplicate active-error prevention", TestDuplicateActiveErrors),
+            Run("HashSet consistency after queue clearing", TestSetConsistencyAfterClear),
+            Run("HashSet consistency under repeated operations", TestRepeatedSetOperations),
+            Run("HashSet consistency under concurrent submissions", TestConcurrentSetConsistency),
+
             Run("Repeated collection operations", TestRepeatedOperations),
             Run("Concurrent command submissions", TestConcurrentSubmissions),
             Run("Concurrent critical alert ingestion", TestConcurrentAlerts),
@@ -246,16 +257,14 @@ public static class CommandCollectionDiagnostics
 
         service.Enqueue("Sensor-001", "First", "Normal");
 
-        var firstLookup =
-            service.GetCommandsForDevice("sensor-001");
+        var firstLookup = service.GetCommandsForDevice("sensor-001");
 
         Assert(firstLookup.Count == 1,
             "Initial device lookup returned the wrong count.");
 
         service.Enqueue("SENSOR-001", "Second", "High");
 
-        var secondLookup =
-            service.GetCommandsForDevice("Sensor-001");
+        var secondLookup = service.GetCommandsForDevice("Sensor-001");
 
         Assert(secondLookup.Count == 2,
             "Device cache did not reflect a subsequent insertion.");
@@ -275,11 +284,7 @@ public static class CommandCollectionDiagnostics
         var service = CreateService();
 
         for (var i = 0; i < 30; i++)
-        {
-            service.Enqueue(
-                $"Device-{i % 3}",
-                $"Command-{i}");
-        }
+            service.Enqueue($"Device-{i % 3}", $"Command-{i}");
 
         var timeline = service.GetCommandTimeline();
 
@@ -311,8 +316,7 @@ public static class CommandCollectionDiagnostics
             "Timeline omitted a command within the requested date range.");
 
         Assert(range.All(record =>
-                record.CreatedAt >= middle.CreatedAt &&
-                record.CreatedAt <= middle.CreatedAt),
+                record.CreatedAt == middle.CreatedAt),
             "Timeline returned commands outside the requested date range.");
 
         var inclusiveRange = service.GetCommandTimeline(
@@ -436,6 +440,259 @@ public static class CommandCollectionDiagnostics
             "Clearing the audit log unexpectedly removed active errors.");
     }
 
+    private static void TestUniqueCommandTracking()
+    {
+        var service = CreateService();
+
+        var first = service.Enqueue("D1", "First");
+        var second = service.Enqueue("D1", "Second");
+        var third = service.Enqueue("D2", "Third");
+
+        Assert(service.UniqueCommandCount == 3,
+            "Unique command tracking returned an incorrect count.");
+
+        Assert(service.ContainsCommand(first.Id) &&
+               service.ContainsCommand(second.Id) &&
+               service.ContainsCommand(third.Id),
+            "One or more command IDs were not tracked.");
+
+        Assert(!service.ContainsCommand(Guid.Empty),
+            "An unknown command ID was reported as tracked.");
+
+        Assert(service.Queue.Select(record => record.Id).Distinct().Count()
+                == service.QueueCount,
+            "Pending queue contains duplicate command IDs.");
+
+        Assert(service.History.Select(record => record.Id).Distinct().Count()
+                == service.HistoryCount,
+            "Command history contains duplicate command IDs.");
+
+        Assert(service.Queue.All(record => service.ContainsCommand(record.Id)),
+            "A queued command is missing from unique command tracking.");
+    }
+
+    private static void TestPendingSetLifecycle()
+    {
+        var service = CreateService();
+
+        var first = service.Enqueue("D1", "First");
+        var second = service.Enqueue("D1", "Second");
+
+        Assert(service.IsCommandPending(first.Id) &&
+               service.IsCommandPending(second.Id),
+            "Newly enqueued commands were not marked pending.");
+
+        var processed = service.ProcessNext();
+
+        Assert(processed?.Id == first.Id,
+            "The first command was not processed.");
+
+        Assert(!service.IsCommandPending(first.Id),
+            "Processed command remained in the pending set.");
+
+        Assert(service.IsCommandPending(second.Id),
+            "Processing one command incorrectly removed another pending ID.");
+
+        var undone = service.UndoLast();
+
+        Assert(undone?.Id == second.Id,
+            "Undo did not remove the expected pending command.");
+
+        Assert(!service.IsCommandPending(second.Id),
+            "Undone command remained in the pending set.");
+
+        Assert(service.QueueCount == 0,
+            "Pending queue should be empty after processing and undo.");
+
+        Assert(service.UniqueCommandCount == 2,
+            "Processing or undo incorrectly changed unique command tracking.");
+
+        Assert(service.ContainsCommand(first.Id) &&
+               service.ContainsCommand(second.Id),
+            "Processing or undo removed historical command tracking.");
+    }
+
+    private static void TestDuplicateActiveErrors()
+    {
+        var service = CreateService();
+
+        service.RecordActiveError("sensor-overheat");
+        service.RecordActiveError("sensor-overheat");
+        service.RecordActiveError("SENSOR-OVERHEAT");
+        service.RecordActiveError("Sensor-Overheat");
+
+        Assert(service.ActiveErrorCount == 1,
+            "Case variations of one error were counted as distinct errors.");
+
+        service.RecordActiveError("sensor-offline");
+        service.RecordActiveError("SENSOR-OFFLINE");
+
+        Assert(service.ActiveErrorCount == 2,
+            "Distinct active errors were not tracked uniquely.");
+
+        service.ResolveActiveError("SENSOR-OVERHEAT");
+
+        Assert(service.ActiveErrorCount == 1,
+            "Resolving an error did not remove its case-insensitive key.");
+
+        service.ResolveActiveError("sensor-offline");
+
+        Assert(service.ActiveErrorCount == 0,
+            "Resolved errors remain in the active-error set.");
+    }
+
+    private static void TestSetConsistencyAfterClear()
+    {
+        var service = CreateService();
+
+        var first = service.Enqueue("D1", "First");
+        var second = service.Enqueue("D2", "Second");
+        var third = service.EnqueueCriticalAlert("D3", "Third");
+
+        var ids = new[] { first.Id, second.Id, third.Id };
+
+        Assert(service.QueueCount == ids.Length,
+            "Setup did not create three pending commands.");
+
+        Assert(service.UniqueCommandCount == ids.Length,
+            "Setup did not create three unique command IDs.");
+
+        Assert(ids.All(service.IsCommandPending),
+            "A command was not pending before queue clearing.");
+
+        var cleared = service.ClearQueue();
+
+        Assert(cleared == ids.Length,
+            "ClearQueue returned an incorrect number of cleared commands.");
+
+        Assert(service.QueueCount == 0,
+            "Pending queue is not empty after clearing.");
+
+        Assert(ids.All(id => !service.IsCommandPending(id)),
+            "Cleared command IDs remain in the pending set.");
+
+        Assert(service.UniqueCommandCount == ids.Length,
+            "Clearing the queue unexpectedly removed unique command tracking.");
+
+        Assert(ids.All(service.ContainsCommand),
+            "Cleared commands were removed from command history tracking.");
+
+        Assert(service.HistoryCount == ids.Length,
+            "Clearing the queue unexpectedly removed command history.");
+    }
+
+    private static void TestRepeatedSetOperations()
+    {
+        var service = CreateService();
+
+        const int commandCount = 500;
+
+        var records = new List<CommandRecord>(commandCount);
+
+        for (var i = 0; i < commandCount; i++)
+        {
+            records.Add(service.Enqueue(
+                $"Device-{i % 10}",
+                $"Command-{i}"));
+        }
+
+        Assert(service.UniqueCommandCount == commandCount,
+            "Unique ID count is incorrect after repeated insertions.");
+
+        Assert(records.Select(record => record.Id).Distinct().Count()
+                == commandCount,
+            "Generated command IDs are not unique.");
+
+        Assert(records.All(record => service.ContainsCommand(record.Id)),
+            "One or more inserted IDs cannot be found.");
+
+        for (var i = 0; i < 200; i++)
+        {
+            var processed = service.ProcessNext();
+
+            Assert(processed is not null,
+                "Expected a pending command to be processed.");
+
+            Assert(!service.IsCommandPending(processed.Id),
+                "Processed command remained pending.");
+        }
+
+        for (var i = 0; i < 100; i++)
+        {
+            var undone = service.UndoLast();
+
+            Assert(undone is not null,
+                "Expected a pending command to be undone.");
+
+            Assert(!service.IsCommandPending(undone.Id),
+                "Undone command remained pending.");
+        }
+
+        Assert(service.UniqueCommandCount == commandCount,
+            "Processing and undo changed the unique ID count.");
+
+        Assert(service.HistoryCount == commandCount,
+            "Processing and undo changed historical record count.");
+
+        Assert(service.QueueCount == commandCount - 300,
+            "Pending count is inconsistent after processing and undo.");
+
+        Assert(service.Queue.Select(record => record.Id).Distinct().Count()
+                == service.QueueCount,
+            "Duplicate IDs exist in the pending queue.");
+
+        Assert(service.Queue.All(record => service.IsCommandPending(record.Id)),
+            "A queued command is absent from the pending set.");
+
+        Assert(records.All(record => service.ContainsCommand(record.Id)),
+            "Historical command tracking lost an ID.");
+    }
+
+    private static void TestConcurrentSetConsistency()
+    {
+        var service = CreateService();
+
+        const int workers = 8;
+        const int commandsPerWorker = 100;
+        const int expected = workers * commandsPerWorker;
+
+        Parallel.For(0, workers, worker =>
+        {
+            for (var i = 0; i < commandsPerWorker; i++)
+            {
+                service.Enqueue(
+                    $"Device-{worker}",
+                    $"Concurrent-{worker}-{i}");
+            }
+        });
+
+        Assert(service.UniqueCommandCount == expected,
+            "Concurrent insertion produced an incorrect unique ID count.");
+
+        var queueIds = service.Queue
+            .Select(record => record.Id)
+            .ToArray();
+
+        Assert(queueIds.Length == expected,
+            "Concurrent insertion produced an incorrect pending count.");
+
+        Assert(queueIds.Distinct().Count() == expected,
+            "Concurrent insertion produced duplicate command IDs.");
+
+        Assert(queueIds.All(service.ContainsCommand),
+            "A pending ID is missing from unique command tracking.");
+
+        Assert(queueIds.All(service.IsCommandPending),
+            "A queued ID is missing from pending membership.");
+
+        Assert(service.History.Select(record => record.Id).Distinct().Count()
+                == expected,
+            "Concurrent insertion produced duplicate history IDs.");
+
+        Assert(service.HistoryCount == expected,
+            "Concurrent insertion produced an incorrect history count.");
+    }
+
     private static void TestRepeatedOperations()
     {
         var service = CreateService();
@@ -479,6 +736,15 @@ public static class CommandCollectionDiagnostics
 
         Assert(service.GetCommandTimeline().Count == 250,
             "Timeline query returned an incorrect number of records.");
+
+        Assert(service.UniqueCommandCount == 250,
+            "Unique command tracking lost or duplicated IDs.");
+
+        Assert(service.Queue.All(record => service.IsCommandPending(record.Id)),
+            "A queued command is missing from the pending set.");
+
+        Assert(service.Queue.All(record => service.ContainsCommand(record.Id)),
+            "A queued command is missing from unique command tracking.");
     }
 
     private static void TestConcurrentSubmissions()
@@ -510,6 +776,12 @@ public static class CommandCollectionDiagnostics
         Assert(service.Queue.Select(record => record.Id).Distinct().Count()
                 == expected,
             "Pending queue contains duplicate command IDs.");
+
+        Assert(service.UniqueCommandCount == expected,
+            "Concurrent submissions produced an incorrect unique ID count.");
+
+        Assert(service.Queue.All(record => service.IsCommandPending(record.Id)),
+            "Concurrent submissions left queued IDs absent from pending membership.");
 
         Assert(service.GetCommandTimeline().Count == expected,
             "Concurrent submissions corrupted the sorted timeline.");
@@ -548,6 +820,9 @@ public static class CommandCollectionDiagnostics
         Assert(service.CriticalQueueCount == expected,
             "Not every alert received Critical priority.");
 
+        Assert(service.UniqueCommandCount == expected,
+            "Concurrent alerts produced an incorrect unique ID count.");
+
         for (var i = 0; i < expected; i++)
         {
             var record = service.ProcessNext();
@@ -557,6 +832,9 @@ public static class CommandCollectionDiagnostics
 
             Assert(record.Priority == "Critical",
                 "A non-critical command was selected ahead of a critical alert.");
+
+            Assert(!service.IsCommandPending(record.Id),
+                "A processed alert remained in the pending set.");
         }
 
         Assert(service.QueueCount == 0,
@@ -564,6 +842,9 @@ public static class CommandCollectionDiagnostics
 
         Assert(service.HistoryCount == expected,
             "Processing alerts corrupted the sorted history.");
+
+        Assert(service.UniqueCommandCount == expected,
+            "Processing alerts changed the unique command count.");
     }
 
     private static void TestLookupWorkload()
@@ -598,13 +879,14 @@ public static class CommandCollectionDiagnostics
         lookupTimer.Stop();
 
         var timelineTimer = Stopwatch.StartNew();
-
         var timeline = service.GetCommandTimeline(limit: 100);
-
         timelineTimer.Stop();
 
         Assert(service.HistoryCount == totalCommands,
             "Lookup workload produced an incorrect history count.");
+
+        Assert(service.UniqueCommandCount == totalCommands,
+            "Lookup workload produced an incorrect unique command count.");
 
         Assert(timeline.Count == 100,
             "Sorted timeline did not return the requested 100 records.");
