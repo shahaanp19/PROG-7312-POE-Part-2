@@ -8,7 +8,7 @@
 
 @inject IHttpClientFactory HttpClientFactory
 @inject RecommendationEngine RecommendationEngine
-@implements IDisposable
+@implements IAsyncDisposable
 
 <div class="sx-page">
 
@@ -19,10 +19,7 @@
                 SMART-X / EDGE OPERATIONS
             </div>
 
-            <h1>
-                Data Ingestion
-                <span>Gateway</span>
-            </h1>
+            <h1>Data Ingestion <span>Gateway</span></h1>
 
             <p class="sx-hero-description">
                 Centralised telemetry monitoring, sensor management,
@@ -34,7 +31,6 @@
                     <span class="sx-status-dot @(GatewayOnline ? "online" : "offline")"></span>
                     <span>@GatewayStatus</span>
                 </div>
-
                 <span class="sx-divider"></span>
                 <span class="sx-meta-text">Edge Gateway Interface</span>
             </div>
@@ -87,9 +83,13 @@
                 </p>
             </div>
 
-            <div class="sx-live-label">
+            <div class="sx-live-label" role="status" aria-live="polite">
                 <span></span>
-                @(IsLoadingRecommendations ? "ANALYSING" : "LIVE ANALYSIS")
+                @(IsLoadingRecommendations
+                    ? "ANALYSING"
+                    : RecommendationLoadFailed
+                        ? "DATA STALE"
+                        : "LIVE ANALYSIS")
             </div>
         </div>
 
@@ -97,7 +97,7 @@
             <article class="sx-kpi-card">
                 <span class="sx-kpi-label">SENSORS ANALYSED</span>
                 <strong>@SensorsAnalysed</strong>
-                <span class="sx-kpi-description">Sensors with recent telemetry</span>
+                <span class="sx-kpi-description">Sensors with retrieved telemetry</span>
             </article>
 
             <article class="sx-kpi-card">
@@ -119,11 +119,67 @@
             </article>
         </div>
 
-        @if (!string.IsNullOrWhiteSpace(RecommendationMessage))
+        @if (CriticalRecommendationCount > 0)
         {
-            <div class="sx-feedback @(RecommendationLoadFailed ? "error" : "success")"
-                 role="status" aria-live="polite">
-                <span class="sx-feedback-icon">@(RecommendationLoadFailed ? "!" : "i")</span>
+            <div class="sx-alert sx-alert-critical" role="alert" aria-live="assertive">
+                <div class="sx-alert-icon">!</div>
+                <div>
+                    <strong>Critical predictive action required</strong>
+                    <p>
+                        @CriticalRecommendationCount critical recommendation(s)
+                        require immediate operator review.
+                    </p>
+                    <span class="sx-card-subtext">
+                        @if (LastTelemetryAnalysisUtc.HasValue)
+                        {
+                            <text>Last successful analysis: @LastTelemetryAnalysisUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss").</text>
+                        }
+                        @if (RecommendationLoadFailed)
+                        {
+                            <text> The latest refresh failed; this alert reflects the last successful analysis.</text>
+                        }
+                    </span>
+                </div>
+            </div>
+        }
+        else if (WarningRecommendationCount > 0)
+        {
+            <div class="sx-alert sx-alert-warning" role="status" aria-live="polite">
+                <div class="sx-alert-icon">!</div>
+                <div>
+                    <strong>Predictive warnings detected</strong>
+                    <p>
+                        @WarningRecommendationCount warning recommendation(s)
+                        need investigation and monitoring.
+                    </p>
+                </div>
+            </div>
+        }
+
+        @if (RecommendationLoadFailed)
+        {
+            <div class="sx-feedback error" role="alert" aria-live="assertive">
+                <span class="sx-feedback-icon">!</span>
+                <span>
+                    @RecommendationMessage
+                    @if (LastTelemetryAnalysisUtc.HasValue)
+                    {
+                        <text>
+                            Showing the last successfully generated recommendations from
+                            @LastTelemetryAnalysisUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss").
+                        </text>
+                    }
+                    else
+                    {
+                        <text> No successful analysis is available yet.</text>
+                    }
+                </span>
+            </div>
+        }
+        else if (!string.IsNullOrWhiteSpace(RecommendationMessage))
+        {
+            <div class="sx-feedback success" role="status" aria-live="polite">
+                <span class="sx-feedback-icon">i</span>
                 <span>@RecommendationMessage</span>
             </div>
         }
@@ -134,7 +190,7 @@
                 <div class="sx-spinner"></div>
                 <div>
                     <strong>Analysing telemetry</strong>
-                    <span>Evaluating available sensor readings and operational risk...</span>
+                    <span>Evaluating sensor readings and operational risk...</span>
                 </div>
             </div>
         }
@@ -154,8 +210,7 @@
             <div class="sx-issue-grid">
                 @foreach (var recommendation in Recommendations)
                 {
-                    <article class="sx-issue-card"
-                             @key="RecommendationKey(recommendation)">
+                    <article class="sx-issue-card" @key="RecommendationKey(recommendation)">
                         <div class="sx-issue-top">
                             <span class="sx-severity @GetRecommendationSeverityClass(recommendation.Severity)">
                                 @recommendation.Severity
@@ -183,6 +238,14 @@
                             <span>RECOMMENDED ACTION</span>
                             <strong>@GetRecommendedAction(recommendation)</strong>
                         </div>
+
+                        @if (LastTelemetryAnalysisUtc.HasValue)
+                        {
+                            <div class="sx-issue-meta">
+                                <span>LAST EVALUATED</span>
+                                <strong>@LastTelemetryAnalysisUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</strong>
+                            </div>
+                        }
                     </article>
                 }
             </div>
@@ -191,8 +254,13 @@
         @if (LastTelemetryAnalysisUtc.HasValue)
         {
             <p class="sx-card-subtext">
-                Last analysis: @LastTelemetryAnalysisUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+                Last successful analysis:
+                @LastTelemetryAnalysisUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
                 · Automatic refresh every 10 seconds
+                @if (RecommendationLoadFailed)
+                {
+                    <span> · Displayed results may be stale</span>
+                }
             </p>
         }
     </section>
@@ -207,7 +275,6 @@
                     according to severity and current system state.
                 </p>
             </div>
-
             <div class="sx-live-label"><span></span>LIVE MONITORING</div>
         </div>
 
@@ -231,7 +298,6 @@
                         Snapshot generated @EngagementSnapshot.GeneratedAtUtc.ToLocalTime()
                     </span>
                 </div>
-
                 <div class="sx-attention-indicator"><span></span></div>
             </div>
 
@@ -275,7 +341,7 @@
 
             @if (EngagementSnapshot.CriticalOpenIssues > 0)
             {
-                <div class="sx-alert sx-alert-critical">
+                <div class="sx-alert sx-alert-critical" role="alert" aria-live="assertive">
                     <div class="sx-alert-icon">!</div>
                     <div>
                         <strong>Immediate attention required</strong>
@@ -290,7 +356,7 @@
             }
             else if (EngagementSnapshot.WarningOpenIssues > 0)
             {
-                <div class="sx-alert sx-alert-warning">
+                <div class="sx-alert sx-alert-warning" role="status" aria-live="polite">
                     <div class="sx-alert-icon">!</div>
                     <div>
                         <strong>Attention required</strong>
@@ -305,7 +371,7 @@
             }
             else if (EngagementSnapshot.OpenIssues > 0)
             {
-                <div class="sx-alert sx-alert-info">
+                <div class="sx-alert sx-alert-info" role="status" aria-live="polite">
                     <div class="sx-alert-icon">i</div>
                     <div>
                         <strong>Monitoring active</strong>
@@ -315,7 +381,7 @@
             }
             else
             {
-                <div class="sx-alert sx-alert-success">
+                <div class="sx-alert sx-alert-success" role="status" aria-live="polite">
                     <div class="sx-alert-icon">✓</div>
                     <div>
                         <strong>All systems clear</strong>
@@ -323,6 +389,20 @@
                     </div>
                 </div>
             }
+        }
+
+        @if (EngagementLoadFailed)
+        {
+            <div class="sx-feedback error" role="alert" aria-live="assertive">
+                <span class="sx-feedback-icon">!</span>
+                <span>
+                    @EngagementErrorMessage
+                    @if (EngagementSnapshot is not null)
+                    {
+                        <text> The last successfully loaded incident snapshot is still displayed.</text>
+                    }
+                </span>
+            </div>
         }
     </section>
 
@@ -337,7 +417,8 @@
                 </div>
             </div>
 
-            @if (!EngagementSnapshot.PriorityIssues.Any())
+            @if (EngagementSnapshot.PriorityIssues is null ||
+                 EngagementSnapshot.PriorityIssues.Count == 0)
             {
                 <div class="sx-empty-state">
                     <div class="sx-empty-icon">✓</div>
@@ -352,7 +433,9 @@
                     {
                         <article class="sx-issue-card" @key="issue.Id">
                             <div class="sx-issue-top">
-                                <span class="sx-severity sx-severity-@issue.Severity.ToLowerInvariant()">@issue.Severity</span>
+                                <span class="sx-severity sx-severity-@GetSeverityCss(issue.Severity)">
+                                    @issue.Severity
+                                </span>
                                 <span class="sx-issue-status">@issue.Status</span>
                             </div>
 
@@ -480,7 +563,6 @@
                 <h2>Live Incident Board</h2>
                 <p>Current incident activity across the Smart-X environment.</p>
             </div>
-
             <div class="sx-live-label"><span></span>AUTO REFRESH / 10 SEC</div>
         </div>
 
@@ -509,7 +591,9 @@
                 {
                     <article class="sx-issue-card" @key="issue.Id">
                         <div class="sx-issue-top">
-                            <span class="sx-severity sx-severity-@issue.Severity.ToLowerInvariant()">@issue.Severity</span>
+                            <span class="sx-severity sx-severity-@GetSeverityCss(issue.Severity)">
+                                @issue.Severity
+                            </span>
                             <span class="sx-issue-status">@issue.Status</span>
                         </div>
 
@@ -550,7 +634,8 @@
                 </div>
             </div>
 
-            @if (!EngagementSnapshot.RecentActivity.Any())
+            @if (EngagementSnapshot.RecentActivity is null ||
+                 EngagementSnapshot.RecentActivity.Count == 0)
             {
                 <div class="sx-empty-state">
                     <strong>No recent activity</strong>
@@ -567,7 +652,9 @@
                             <div class="sx-timeline-content">
                                 <div class="sx-timeline-heading">
                                     <h3>@issue.Title</h3>
-                                    <span class="sx-severity sx-severity-@issue.Severity.ToLowerInvariant()">@issue.Severity</span>
+                                    <span class="sx-severity sx-severity-@GetSeverityCss(issue.Severity)">
+                                        @issue.Severity
+                                    </span>
                                 </div>
 
                                 <div class="sx-timeline-meta">
@@ -651,6 +738,8 @@
     private bool IsLoadingIssues;
     private bool IsReportingIssue;
     private bool IsResolvingIssue;
+    private bool EngagementLoadFailed;
+    private string? EngagementErrorMessage;
 
     private string? DashboardMessage;
     private string DashboardMessageCssClass = string.Empty;
@@ -675,7 +764,9 @@
     private PeriodicTimer? _refreshTimer;
     private CancellationTokenSource? _refreshCancellation;
     private Task? _refreshTask;
+
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
+    private readonly SemaphoreSlim _recommendationLock = new(1, 1);
 
     private IEnumerable<UserIssue> FilteredIssues
     {
@@ -695,13 +786,13 @@
             if (!SelectedSeverity.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
                 result = result.Where(issue =>
-                    issue.Severity.Equals(SelectedSeverity, StringComparison.OrdinalIgnoreCase));
+                    string.Equals(issue.Severity, SelectedSeverity, StringComparison.OrdinalIgnoreCase));
             }
 
             if (!SelectedStatus.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
                 result = result.Where(issue =>
-                    issue.Status.Equals(SelectedStatus, StringComparison.OrdinalIgnoreCase));
+                    string.Equals(issue.Status, SelectedStatus, StringComparison.OrdinalIgnoreCase));
             }
 
             return SelectedSort switch
@@ -740,6 +831,15 @@
             _ => 0
         };
 
+    private static string GetSeverityCss(string? severity) =>
+        severity?.Trim().ToLowerInvariant() switch
+        {
+            "critical" => "critical",
+            "warning" => "warning",
+            "info" or "information" => "info",
+            _ => "info"
+        };
+
     private static string GetRecommendationSeverityClass(RecommendationSeverity severity) =>
         severity switch
         {
@@ -749,7 +849,7 @@
         };
 
     private static string RecommendationKey(SmartXRecommendation recommendation) =>
-        $"{recommendation.Title}|{recommendation.DeviceId}";
+        $"{recommendation.Title}|{recommendation.DeviceId}|{recommendation.Description}";
 
     private static string GetRecommendedAction(SmartXRecommendation recommendation)
     {
@@ -785,6 +885,7 @@
             {
                 GatewayStatus = "Gateway Online";
                 ConnectionMessage = "Successfully connected to the Smart-X API.";
+
                 await LoadEngagementAsync();
                 await LoadPredictiveRecommendationsAsync();
             }
@@ -827,29 +928,52 @@
             var snapshot = await client.GetFromJsonAsync<DashboardEngagementSnapshot>(
                 "api/dashboard/engagement");
 
-            if (snapshot is not null)
+            if (snapshot is null)
             {
-                EngagementSnapshot = snapshot;
-
-                Issues = snapshot.RecentActivity
-                    .Concat(snapshot.PriorityIssues)
-                    .GroupBy(issue => issue.Id)
-                    .Select(group => group.First())
-                    .OrderByDescending(issue => issue.ReportedAtUtc)
-                    .ToList();
+                EngagementLoadFailed = true;
+                EngagementErrorMessage = "The engagement API returned an empty response.";
+                return;
             }
 
-            DashboardMessage = null;
+            EngagementSnapshot = snapshot;
+
+            var recentActivity = snapshot.RecentActivity ?? new List<UserIssue>();
+            var priorityIssues = snapshot.PriorityIssues ?? new List<UserIssue>();
+
+            Issues = recentActivity
+                .Concat(priorityIssues)
+                .GroupBy(issue => issue.Id)
+                .Select(group => group
+                    .OrderByDescending(issue => issue.ReportedAtUtc)
+                    .First())
+                .OrderByDescending(issue => issue.ReportedAtUtc)
+                .ToList();
+
+            EngagementLoadFailed = false;
+            EngagementErrorMessage = null;
+
+            if (DashboardMessageCssClass == "connection-error")
+            {
+                DashboardMessage = null;
+                DashboardMessageCssClass = string.Empty;
+            }
         }
         catch (HttpRequestException)
         {
-            DashboardMessage = "Unable to refresh dashboard engagement data.";
-            DashboardMessageCssClass = "connection-error";
+            EngagementLoadFailed = true;
+            EngagementErrorMessage = "Unable to refresh dashboard engagement data.";
+            SetDashboardMessage(EngagementErrorMessage, false);
         }
         catch (JsonException)
         {
-            DashboardMessage = "The engagement API returned invalid data.";
-            DashboardMessageCssClass = "connection-error";
+            EngagementLoadFailed = true;
+            EngagementErrorMessage = "The engagement API returned invalid data.";
+            SetDashboardMessage(EngagementErrorMessage, false);
+        }
+        catch (OperationCanceledException)
+        {
+            EngagementLoadFailed = true;
+            EngagementErrorMessage = "The engagement API request timed out.";
         }
         finally
         {
@@ -861,12 +985,10 @@
 
     private async Task LoadPredictiveRecommendationsAsync()
     {
-        if (IsLoadingRecommendations)
+        if (!await _recommendationLock.WaitAsync(0))
             return;
 
         IsLoadingRecommendations = true;
-        RecommendationLoadFailed = false;
-        RecommendationMessage = null;
 
         try
         {
@@ -875,17 +997,23 @@
             var readings = await client.GetFromJsonAsync<List<TelemetryHistoryDto>>(
                 "api/telemetry-history/recent?countPerSensor=100");
 
-            readings ??= new List<TelemetryHistoryDto>();
+            if (readings is null)
+            {
+                RecommendationLoadFailed = true;
+                RecommendationMessage = "The telemetry history API returned an empty response.";
+                return;
+            }
 
+            // Keep non-finite values so the engine can identify invalid telemetry.
+            // Reject only readings that cannot be associated with a sensor and metric.
             var observations = readings
                 .Where(reading =>
                     reading.SensorId != Guid.Empty &&
-                    double.IsFinite(reading.Value) &&
                     !string.IsNullOrWhiteSpace(reading.MetricName))
                 .Select(reading => new TelemetryObservation
                 {
                     DeviceId = reading.SensorId,
-                    Metric = reading.MetricName,
+                    Metric = reading.MetricName.Trim(),
                     Value = reading.Value,
                     Unit = reading.Unit ?? string.Empty,
                     ObservedAt = reading.ObservedAt.UtcDateTime,
@@ -896,10 +1024,19 @@
 
             var generated = RecommendationEngine.Generate(observations);
 
-            Recommendations = generated
+            // Preserve separate device-specific and description-specific alerts.
+            var orderedRecommendations = generated
+                .GroupBy(RecommendationKey, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group
+                    .OrderBy(item => item.Severity)
+                    .First())
                 .OrderBy(item => item.Severity)
                 .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.DeviceId)
                 .ToList();
+
+            // Update visible data only after retrieval and analysis succeed.
+            Recommendations = orderedRecommendations;
 
             SensorsAnalysed = observations
                 .Select(item => item.DeviceId)
@@ -908,24 +1045,36 @@
 
             ReadingsAnalysed = observations.Count;
             LastTelemetryAnalysisUtc = DateTimeOffset.UtcNow;
+            RecommendationLoadFailed = false;
 
             RecommendationMessage = observations.Count == 0
-                ? "No usable timestamped telemetry is available yet. Submit readings through the telemetry ingestion endpoint to enable data-driven predictions."
-                : $"Analysed {ReadingsAnalysed} readings across {SensorsAnalysed} sensors.";
+                ? "No timestamped sensor telemetry is available yet. Submit readings through the telemetry ingestion endpoint to enable sensor-based predictions. Operational command-state recommendations are also evaluated."
+                : $"Analysed {ReadingsAnalysed} readings across {SensorsAnalysed} sensors and evaluated current operational command state.";
         }
         catch (HttpRequestException)
         {
             RecommendationLoadFailed = true;
-            RecommendationMessage = "Predictive analysis could not retrieve telemetry history from the API.";
+            RecommendationMessage = "Predictive analysis could not retrieve telemetry history from the API. Previous recommendations are retained.";
         }
         catch (JsonException)
         {
             RecommendationLoadFailed = true;
-            RecommendationMessage = "The telemetry history API returned data in an unexpected format.";
+            RecommendationMessage = "The telemetry history API returned data in an unexpected format. Previous recommendations are retained.";
+        }
+        catch (OperationCanceledException)
+        {
+            RecommendationLoadFailed = true;
+            RecommendationMessage = "The telemetry history request timed out. Previous recommendations are retained.";
+        }
+        catch (NotSupportedException)
+        {
+            RecommendationLoadFailed = true;
+            RecommendationMessage = "The telemetry history response could not be deserialised. Previous recommendations are retained.";
         }
         finally
         {
             IsLoadingRecommendations = false;
+            _recommendationLock.Release();
         }
     }
 
@@ -965,7 +1114,9 @@
 
             if (!response.IsSuccessStatusCode)
             {
-                SetDashboardMessage($"Issue could not be reported. HTTP {(int)response.StatusCode}.", false);
+                SetDashboardMessage(
+                    $"Issue could not be reported. HTTP {(int)response.StatusCode}.",
+                    false);
                 return;
             }
 
@@ -980,6 +1131,14 @@
         {
             SetDashboardMessage("Unable to connect to the Smart-X API.", false);
         }
+        catch (OperationCanceledException)
+        {
+            SetDashboardMessage("The incident report request timed out.", false);
+        }
+        catch (JsonException)
+        {
+            SetDashboardMessage("The incident report returned invalid data.", false);
+        }
         finally
         {
             IsReportingIssue = false;
@@ -988,7 +1147,7 @@
 
     private async Task ResolveIssueAsync(Guid issueId)
     {
-        if (IsResolvingIssue)
+        if (IsResolvingIssue || issueId == Guid.Empty)
             return;
 
         IsResolvingIssue = true;
@@ -1003,7 +1162,9 @@
 
             if (!response.IsSuccessStatusCode)
             {
-                SetDashboardMessage($"Issue could not be resolved. HTTP {(int)response.StatusCode}.", false);
+                SetDashboardMessage(
+                    $"Issue could not be resolved. HTTP {(int)response.StatusCode}.",
+                    false);
                 return;
             }
 
@@ -1013,6 +1174,10 @@
         catch (HttpRequestException)
         {
             SetDashboardMessage("Unable to connect to the Smart-X API.", false);
+        }
+        catch (OperationCanceledException)
+        {
+            SetDashboardMessage("The incident resolution request timed out.", false);
         }
         finally
         {
@@ -1030,6 +1195,9 @@
 
     private void StartLiveRefresh()
     {
+        if (_refreshTask is not null)
+            return;
+
         _refreshCancellation = new CancellationTokenSource();
         _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(10));
         _refreshTask = RefreshLoopAsync(_refreshCancellation.Token);
@@ -1037,20 +1205,26 @@
 
     private async Task RefreshLoopAsync(CancellationToken cancellationToken)
     {
-        if (_refreshTimer is null)
+        var timer = _refreshTimer;
+
+        if (timer is null)
             return;
 
         try
         {
-            while (await _refreshTimer.WaitForNextTickAsync(cancellationToken))
+            while (await timer.WaitForNextTickAsync(cancellationToken))
             {
-                if (!GatewayOnline)
-                    continue;
-
                 await InvokeAsync(async () =>
                 {
+                    if (!GatewayOnline)
+                    {
+                        await CheckGatewayAsync();
+                        return;
+                    }
+
                     await LoadEngagementAsync();
                     await LoadPredictiveRecommendationsAsync();
+
                     StateHasChanged();
                 });
             }
@@ -1061,32 +1235,49 @@
         }
         catch (ObjectDisposedException)
         {
-            // The timer was disposed during navigation.
+            // The timer may be disposed during navigation.
+        }
+        catch (InvalidOperationException)
+        {
+            // The renderer may no longer be available during navigation.
         }
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         _refreshCancellation?.Cancel();
         _refreshTimer?.Dispose();
+
+        if (_refreshTask is not null)
+        {
+            try
+            {
+                await _refreshTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during disposal.
+            }
+            catch (ObjectDisposedException)
+            {
+                // The timer has already been disposed.
+            }
+        }
+
         _refreshCancellation?.Dispose();
-        _refreshLock.Dispose();
+
+        // Keep the semaphores alive for any outstanding UI operation
+        // that still needs to release them.
     }
 
     private sealed class TelemetryHistoryDto
     {
         public Guid SensorId { get; set; }
-
         public double Value { get; set; }
-
         public DateTimeOffset ObservedAt { get; set; }
-
         public string MetricName { get; set; } = string.Empty;
-
         public string Unit { get; set; } = string.Empty;
-
         public double WarningThreshold { get; set; }
-
         public double CriticalThreshold { get; set; }
     }
 }
