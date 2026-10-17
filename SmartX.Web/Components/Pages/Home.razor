@@ -877,21 +877,20 @@
 
             readings ??= new List<TelemetryHistoryDto>();
 
-            var validReadings = readings
+            var observations = readings
                 .Where(reading =>
                     reading.SensorId != Guid.Empty &&
                     double.IsFinite(reading.Value) &&
                     !string.IsNullOrWhiteSpace(reading.MetricName))
-                .ToList();
-
-            var observations = validReadings
                 .Select(reading => new TelemetryObservation
                 {
                     DeviceId = reading.SensorId,
                     Metric = reading.MetricName,
                     Value = reading.Value,
                     Unit = reading.Unit ?? string.Empty,
-                    ObservedAt = reading.ObservedAt.UtcDateTime
+                    ObservedAt = reading.ObservedAt.UtcDateTime,
+                    WarningThreshold = reading.WarningThreshold,
+                    CriticalThreshold = reading.CriticalThreshold
                 })
                 .ToList();
 
@@ -899,7 +898,7 @@
 
             Recommendations = generated
                 .OrderBy(item => item.Severity)
-                .ThenBy(item => item.Title)
+                .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             SensorsAnalysed = observations
@@ -1077,9 +1076,17 @@
     private sealed class TelemetryHistoryDto
     {
         public Guid SensorId { get; set; }
+
         public double Value { get; set; }
+
         public DateTimeOffset ObservedAt { get; set; }
+
         public string MetricName { get; set; } = string.Empty;
+
         public string Unit { get; set; } = string.Empty;
+
+        public double WarningThreshold { get; set; }
+
+        public double CriticalThreshold { get; set; }
     }
 }
