@@ -22,7 +22,6 @@ public sealed class RecommendationEngine
         string? searchQuery = null)
     {
         var recommendations = new List<SmartXRecommendation>();
-
         var observations = (telemetry ?? Enumerable.Empty<TelemetryObservation>())
             .Where(x => x is not null)
             .ToList();
@@ -38,7 +37,7 @@ public sealed class RecommendationEngine
 
         return recommendations
             .GroupBy(
-                x => $"{x.Title}|{x.DeviceId}",
+                x => $"{x.Title}|{x.DeviceId}|{x.Description}",
                 StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderBy(x => x.Severity).First())
             .OrderBy(x => x.Severity)
@@ -65,7 +64,10 @@ public sealed class RecommendationEngine
 
         foreach (var item in latestReadings)
         {
-            var metric = item.Metric?.Trim() ?? string.Empty;
+            var metric = string.IsNullOrWhiteSpace(item.Metric)
+                ? "Telemetry"
+                : item.Metric.Trim();
+
             var normalized = NormalizeMetric(metric);
             var observedAt = AsUtc(item.ObservedAt);
 
@@ -111,24 +113,18 @@ public sealed class RecommendationEngine
                 continue;
             }
 
-            var critical = direction == ThresholdDirection.Above
-                ? item.Value >= criticalThreshold
-                : item.Value <= criticalThreshold;
+            var critical = IsThresholdBreached(
+                item.Value, criticalThreshold, direction);
 
-            var warning = direction == ThresholdDirection.Above
-                ? item.Value >= warningThreshold
-                : item.Value <= warningThreshold;
-
-            var metricLabel = string.IsNullOrWhiteSpace(metric)
-                ? "Telemetry"
-                : metric;
+            var warning = IsThresholdBreached(
+                item.Value, warningThreshold, direction);
 
             if (critical)
             {
                 Add(
                     recommendations,
-                    $"Critical {metricLabel}",
-                    $"{metricLabel} is {item.Value:0.##}{item.Unit}, beyond its configured critical threshold of {criticalThreshold:0.##}{item.Unit}. Investigate and take corrective action.",
+                    $"Critical {metric}",
+                    $"{metric} is {item.Value:0.##}{item.Unit}, beyond its configured critical threshold of {criticalThreshold:0.##}{item.Unit}. Investigate and take corrective action.",
                     RecommendationSeverity.Critical,
                     item.DeviceId);
             }
@@ -136,8 +132,8 @@ public sealed class RecommendationEngine
             {
                 Add(
                     recommendations,
-                    $"Elevated {metricLabel}",
-                    $"{metricLabel} is {item.Value:0.##}{item.Unit}, beyond its configured warning threshold of {warningThreshold:0.##}{item.Unit}. Inspect the device and monitor its readings.",
+                    $"Elevated {metric}",
+                    $"{metric} is {item.Value:0.##}{item.Unit}, beyond its configured warning threshold of {warningThreshold:0.##}{item.Unit}. Inspect the device and monitor its readings.",
                     RecommendationSeverity.Warning,
                     item.DeviceId);
             }
@@ -178,18 +174,21 @@ public sealed class RecommendationEngine
             var lastTime = AsUtc(last.ObservedAt);
             var elapsedMinutes = (lastTime - firstTime).TotalMinutes;
 
-            if (elapsedMinutes <= 0 || lastTime > now.AddMinutes(5))
+            if (elapsedMinutes <= 0 ||
+                lastTime > now.AddMinutes(5) ||
+                now - lastTime > StaleThreshold)
+            {
                 continue;
-
-            if (now - lastTime > StaleThreshold)
-                continue;
+            }
 
             var change = last.Value - first.Value;
-
             var relativeChange = Math.Abs(change) /
                 Math.Max(Math.Abs(first.Value), 1d);
 
-            var metric = last.Metric?.Trim() ?? group.Key.Metric;
+            var metric = string.IsNullOrWhiteSpace(last.Metric)
+                ? group.Key.Metric
+                : last.Metric.Trim();
+
             var normalized = NormalizeMetric(metric);
 
             var risingMetric =
@@ -231,16 +230,36 @@ public sealed class RecommendationEngine
                 continue;
             }
 
-            var movingTowardThreshold =
-                direction == ThresholdDirection.Above
-                    ? ratePerMinute > 0
-                    : ratePerMinute < 0;
+            // Calculate time using the distance to the threshold in the
+            // direction of movement. This works for both upper and lower limits.
+            var movingTowardThreshold = direction switch
+            {
+                ThresholdDirection.Above => ratePerMinute > 0,
+                ThresholdDirection.Below => ratePerMinute < 0,
+                _ => false
+            };
 
             if (!movingTowardThreshold)
                 continue;
 
+            var distanceToThreshold = direction switch
+            {
+                ThresholdDirection.Above => criticalThreshold - last.Value,
+                ThresholdDirection.Below => last.Value - criticalThreshold,
+                _ => double.NaN
+            };
+
+            var speedTowardThreshold = Math.Abs(ratePerMinute);
+
+            if (distanceToThreshold <= 0 ||
+                speedTowardThreshold <= 0 ||
+                !double.IsFinite(distanceToThreshold))
+            {
+                continue;
+            }
+
             var minutesToThreshold =
-                (criticalThreshold - last.Value) / ratePerMinute;
+                distanceToThreshold / speedTowardThreshold;
 
             if (!double.IsFinite(minutesToThreshold) ||
                 minutesToThreshold <= 0 ||
@@ -262,6 +281,14 @@ public sealed class RecommendationEngine
         }
     }
 
+    private static bool IsThresholdBreached(
+        double value,
+        double threshold,
+        ThresholdDirection direction) =>
+        direction == ThresholdDirection.Above
+            ? value >= threshold
+            : value <= threshold;
+
     private static bool TryGetRiskThresholds(
         TelemetryObservation observation,
         string normalizedMetric,
@@ -272,20 +299,24 @@ public sealed class RecommendationEngine
         warningThreshold = observation.WarningThreshold;
         criticalThreshold = observation.CriticalThreshold;
 
+        if (!double.IsFinite(warningThreshold) ||
+            !double.IsFinite(criticalThreshold))
+        {
+            direction = ThresholdDirection.Above;
+            return false;
+        }
+
         if (normalizedMetric.Contains("battery") ||
             normalizedMetric.Contains("signal"))
         {
             direction = ThresholdDirection.Below;
 
             if (HasConfiguredThresholds(
-                    warningThreshold,
-                    criticalThreshold,
-                    direction))
+                    warningThreshold, criticalThreshold, direction))
             {
                 return true;
             }
 
-            // Zero values indicate that no thresholds were configured.
             if (warningThreshold != 0 || criticalThreshold != 0)
                 return false;
 
@@ -310,14 +341,11 @@ public sealed class RecommendationEngine
             direction = ThresholdDirection.Above;
 
             if (HasConfiguredThresholds(
-                    warningThreshold,
-                    criticalThreshold,
-                    direction))
+                    warningThreshold, criticalThreshold, direction))
             {
                 return true;
             }
 
-            // Reject partially configured or incorrectly ordered thresholds.
             if (warningThreshold != 0 || criticalThreshold != 0)
                 return false;
 
@@ -335,7 +363,6 @@ public sealed class RecommendationEngine
                 return true;
             }
 
-            // Pressure, power and voltage require configured thresholds.
             return false;
         }
 
@@ -349,13 +376,11 @@ public sealed class RecommendationEngine
         ThresholdDirection direction)
     {
         if (!double.IsFinite(warningThreshold) ||
-            !double.IsFinite(criticalThreshold))
+            !double.IsFinite(criticalThreshold) ||
+            (warningThreshold == 0 && criticalThreshold == 0))
         {
             return false;
         }
-
-        if (warningThreshold == 0 && criticalThreshold == 0)
-            return false;
 
         return direction == ThresholdDirection.Above
             ? warningThreshold < criticalThreshold
@@ -366,50 +391,61 @@ public sealed class RecommendationEngine
         ICollection<SmartXRecommendation> recommendations,
         DateTime now)
     {
-        var queue = _commandState.Queue.ToList();
+        var snapshot = _commandState.GetOperationalSnapshot();
 
-        var criticalCount = queue.Count(x =>
-            x.Priority.ToString().Contains(
-                "Critical", StringComparison.OrdinalIgnoreCase));
-
-        var highCount = queue.Count(x =>
-            x.Priority.ToString().Contains(
-                "High", StringComparison.OrdinalIgnoreCase));
-
-        if (criticalCount > 0)
+        if (snapshot.CriticalPendingCommands > 0)
         {
             Add(
                 recommendations,
                 "Critical commands awaiting processing",
-                $"{criticalCount} critical command(s) are queued. Process and verify them promptly.",
+                $"{snapshot.CriticalPendingCommands} critical command(s) are queued. Process and verify them promptly.",
                 RecommendationSeverity.Critical);
         }
 
-        if (highCount > 0)
+        if (snapshot.HighPendingCommands > 0)
         {
             Add(
                 recommendations,
                 "High-priority commands awaiting processing",
-                $"{highCount} high-priority command(s) are waiting. Review the queue.",
+                $"{snapshot.HighPendingCommands} high-priority command(s) are waiting. Review the queue.",
                 RecommendationSeverity.Warning);
         }
 
-        if (queue.Count >= 25)
+        if (snapshot.PendingCommands >= 25)
         {
             Add(
                 recommendations,
                 "Critical command backlog",
-                $"{queue.Count} commands are queued. Investigate processing delays and prioritise operationally critical work.",
+                $"{snapshot.PendingCommands} commands are queued. Investigate processing delays and prioritise operationally critical work.",
                 RecommendationSeverity.Critical);
         }
-        else if (queue.Count >= 10)
+        else if (snapshot.PendingCommands >= 10)
         {
             Add(
                 recommendations,
                 "Growing command backlog",
-                $"{queue.Count} commands are queued. Review processing speed and recent failures.",
+                $"{snapshot.PendingCommands} commands are queued. Review processing speed and recent failures.",
                 RecommendationSeverity.Warning);
         }
+
+        if (snapshot.OldestPendingCommandAge > TimeSpan.FromMinutes(30))
+        {
+            Add(
+                recommendations,
+                "Severely delayed command",
+                $"The oldest pending command has been waiting {snapshot.OldestPendingCommandAge.TotalMinutes:0} minutes. Investigate blocked processing and command dependencies.",
+                RecommendationSeverity.Critical);
+        }
+        else if (snapshot.OldestPendingCommandAge > TimeSpan.FromMinutes(10))
+        {
+            Add(
+                recommendations,
+                "Command processing delay",
+                $"The oldest pending command has been waiting {snapshot.OldestPendingCommandAge.TotalMinutes:0} minutes. Review queue processing.",
+                RecommendationSeverity.Warning);
+        }
+
+        var queue = _commandState.Queue.ToList();
 
         foreach (var group in queue
             .GroupBy(x => new
@@ -427,22 +463,18 @@ public sealed class RecommendationEngine
                 group.Key.DeviceId);
         }
 
-        foreach (var command in queue)
+        foreach (var device in snapshot.PendingCommandsByDevice
+            .Where(x => x.Value >= 5))
         {
-            var age = now - AsUtc(command.CreatedAt);
-
-            if (age <= TimeSpan.FromMinutes(10))
-                continue;
-
             Add(
                 recommendations,
-                "Command waiting too long",
-                $"Command '{command.Command}' has been waiting for {age.TotalMinutes:0} minutes. Check queue processing and command dependencies.",
-                age > TimeSpan.FromMinutes(30)
-                    ? RecommendationSeverity.Critical
-                    : RecommendationSeverity.Warning,
-                command.DeviceId);
+                "Device command congestion",
+                $"{device.Value} commands are waiting for the same device. Check whether it is offline, unresponsive or receiving duplicate requests.",
+                RecommendationSeverity.Warning,
+                device.Key);
         }
+
+        _ = now;
     }
 
     private void AnalyzeCommandHistory(
@@ -621,28 +653,19 @@ public sealed class RecommendationEngine
 public sealed class TelemetryObservation
 {
     public Guid DeviceId { get; init; }
-
     public string Metric { get; init; } = string.Empty;
-
     public double Value { get; init; }
-
     public string Unit { get; init; } = string.Empty;
-
     public DateTime ObservedAt { get; init; }
-
     public double WarningThreshold { get; init; }
-
     public double CriticalThreshold { get; init; }
 }
 
 public sealed class SmartXRecommendation
 {
     public string Title { get; init; } = string.Empty;
-
     public string Description { get; init; } = string.Empty;
-
     public RecommendationSeverity Severity { get; init; }
-
     public Guid? DeviceId { get; init; }
 }
 

@@ -12,23 +12,16 @@ public sealed class CommandStateService
     private readonly ILogger<CommandStateService>? _logger;
 
     private readonly Queue<Guid> _fifoQueue = new();
-
     private readonly PriorityQueue<CommandRecord, (int Rank, long Sequence)>
         _priorityQueue = new();
-
     private readonly Stack<Guid> _undoStack = new();
 
-    // Authoritative command store: unique IDs and O(1) average lookup.
     private readonly Dictionary<Guid, CommandRecord> _recordsById = new();
-
-    // Tracks only commands currently pending in the queues.
     private readonly HashSet<Guid> _pendingIds = new();
 
-    // Deduplicates active errors using case-insensitive matching.
     private readonly HashSet<string> _activeErrors =
         new(StringComparer.OrdinalIgnoreCase);
 
-    // Per-device indexes use case-insensitive keys.
     private readonly Dictionary<string, List<CommandRecord>> _commandsByDevice =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -46,6 +39,7 @@ public sealed class CommandStateService
     private long _auditSequence;
 
     private const int StaleEntryCompactionThreshold = 64;
+    private const int MaximumRecentCommands = 20;
 
     private int _staleFifoEntries;
     private int _stalePriorityEntries;
@@ -70,6 +64,7 @@ public sealed class CommandStateService
             {
                 return _fifoQueue
                     .Where(_pendingIds.Contains)
+                    .Where(_recordsById.ContainsKey)
                     .Select(id => _recordsById[id])
                     .ToArray();
             }
@@ -130,7 +125,6 @@ public sealed class CommandStateService
         }
     }
 
-    // The record dictionary is the authoritative unique-command collection.
     public int UniqueCommandCount
     {
         get
@@ -166,8 +160,77 @@ public sealed class CommandStateService
     }
 
     /// <summary>
-    /// Validates the collection invariants while holding the state lock.
-    /// Intended for diagnostics and automated consistency tests.
+    /// Produces a consistent operational snapshot for recommendation,
+    /// queue-health and proactive-alert calculations.
+    /// </summary>
+    public CommandOperationalSnapshot GetOperationalSnapshot(
+        TimeSpan? recentWindow = null)
+    {
+        var window = recentWindow ?? TimeSpan.FromMinutes(30);
+
+        if (window <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(recentWindow),
+                "The recent window must be greater than zero.");
+        }
+
+        lock (_sync)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var cutoff = now - window;
+
+            var pending = _pendingIds
+                .Where(_recordsById.ContainsKey)
+                .Select(id => _recordsById[id])
+                .ToArray();
+
+            var recent = _timeline
+                .Where(record => record.CreatedAt >= cutoff &&
+                                 record.CreatedAt <= now)
+                .OrderByDescending(record => record.CreatedAt)
+                .ThenByDescending(record => record.Id)
+                .ToArray();
+
+            var pendingByDevice = pending
+                .GroupBy(
+                    record => record.DeviceId,
+                    StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Count(),
+                    StringComparer.OrdinalIgnoreCase);
+
+            var oldestPending = pending
+                .OrderBy(record => record.CreatedAt)
+                .FirstOrDefault();
+
+            return new CommandOperationalSnapshot
+            {
+                GeneratedAt = now,
+                Window = window,
+                TotalCommands = _recordsById.Count,
+                PendingCommands = pending.Length,
+                CriticalPendingCommands = pending.Count(
+                    record => record.Priority == "Critical"),
+                HighPendingCommands = pending.Count(
+                    record => record.Priority == "High"),
+                ActiveErrors = _activeErrors.ToArray(),
+                ActiveErrorCount = _activeErrors.Count,
+                RecentCommandsCreated = recent.Length,
+                OldestPendingCommandAge = oldestPending is null
+                    ? TimeSpan.Zero
+                    : now - oldestPending.CreatedAt,
+                PendingCommandsByDevice = pendingByDevice,
+                RecentCommands = recent
+                    .Take(MaximumRecentCommands)
+                    .ToArray()
+            };
+        }
+    }
+
+    /// <summary>
+    /// Validates collection invariants while holding the state lock.
     /// </summary>
     public bool ValidateCollectionConsistency(out string details)
     {
@@ -209,8 +272,7 @@ public sealed class CommandStateService
                 }
             }
 
-            if (_pendingIds.Any(id =>
-                    !_fifoQueue.Contains(id)))
+            if (_pendingIds.Any(id => !_fifoQueue.Contains(id)))
             {
                 details =
                     "A pending command is missing from the FIFO queue.";
@@ -233,9 +295,23 @@ public sealed class CommandStateService
                 return false;
             }
 
+            foreach (var record in _recordsById.Values)
+            {
+                if (!_commandsByDevice.TryGetValue(
+                        record.DeviceId,
+                        out var deviceCommands) ||
+                    !deviceCommands.Any(
+                        item => item.Id == record.Id))
+                {
+                    details =
+                        $"Command {record.Id} is missing from its device index.";
+                    return false;
+                }
+            }
+
             details =
-                "Collection invariants passed: command records, timeline, " +
-                "pending set, FIFO queue, priority queue, and undo stack agree.";
+                "Collection invariants passed: records, timeline, pending set, " +
+                "FIFO queue, priority queue, undo stack and device indexes agree.";
 
             return true;
         }
@@ -281,10 +357,7 @@ public sealed class CommandStateService
 
         lock (_sync)
         {
-            // Dictionary.Add rejects duplicate IDs; records remain in history
-            // after processing, undo, or queue clearance.
             _recordsById.Add(record.Id, record);
-
             _pendingIds.Add(record.Id);
             _fifoQueue.Enqueue(record.Id);
 
@@ -636,9 +709,8 @@ public sealed class CommandStateService
                 continue;
             }
 
-            return _recordsById.TryGetValue(id, out var record)
-                ? record
-                : null;
+            if (_recordsById.TryGetValue(id, out var record))
+                return record;
         }
 
         return null;
@@ -843,6 +915,36 @@ public sealed class CommandStateService
             }
         }
     }
+}
+
+public sealed class CommandOperationalSnapshot
+{
+    public DateTimeOffset GeneratedAt { get; init; }
+
+    public TimeSpan Window { get; init; }
+
+    public int TotalCommands { get; init; }
+
+    public int PendingCommands { get; init; }
+
+    public int CriticalPendingCommands { get; init; }
+
+    public int HighPendingCommands { get; init; }
+
+    public int ActiveErrorCount { get; init; }
+
+    public IReadOnlyList<string> ActiveErrors { get; init; } =
+        Array.Empty<string>();
+
+    public int RecentCommandsCreated { get; init; }
+
+    public TimeSpan OldestPendingCommandAge { get; init; }
+
+    public IReadOnlyDictionary<string, int> PendingCommandsByDevice
+    { get; init; } = new Dictionary<string, int>();
+
+    public IReadOnlyList<CommandRecord> RecentCommands { get; init; } =
+        Array.Empty<CommandRecord>();
 }
 
 public sealed class CommandRecord
