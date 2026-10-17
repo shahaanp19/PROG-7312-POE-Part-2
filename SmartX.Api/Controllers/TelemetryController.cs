@@ -148,6 +148,14 @@ public class TelemetryController : ControllerBase
         var metricName = request.MetricName.Trim();
         var unit = request.Unit.Trim();
 
+        if (metricName.Length == 0 || unit.Length == 0)
+        {
+            return BadRequest(new
+            {
+                message = "Telemetry metric name and unit are required."
+            });
+        }
+
         var metric = new TelemetryMetric
         {
             SensorDeviceId = request.SensorDeviceId,
@@ -160,19 +168,33 @@ public class TelemetryController : ControllerBase
             IsEnabled = request.IsEnabled
         };
 
-        var result = _ingestionService.Process(metric, request.Value);
-
-        if (!result.Success)
-            return UnprocessableEntity(result);
+        if (!metric.IsEnabled)
+        {
+            return UnprocessableEntity(new TelemetryIngestionResult
+            {
+                Success = false,
+                SensorDeviceId = request.SensorDeviceId,
+                Message = "This telemetry metric is disabled.",
+                IsAnomaly = false,
+                ProcessedAtUtc = DateTime.UtcNow
+            });
+        }
 
         var observedAt = DateTimeOffset.UtcNow;
 
+        // Preserve finite readings for predictive analysis, even when
+        // the ingestion service subsequently flags them as anomalous.
         _historyService?.AddReading(
             request.SensorDeviceId,
             request.Value,
             metricName,
             unit,
             observedAt);
+
+        var result = _ingestionService.Process(metric, request.Value);
+
+        if (!result.Success)
+            return UnprocessableEntity(result);
 
         return Ok(result);
     }

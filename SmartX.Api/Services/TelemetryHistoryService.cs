@@ -34,7 +34,9 @@ public sealed class TelemetryHistoryService
         Guid sensorId,
         double value,
         DateTimeOffset observedAt)
-        => AddReading(sensorId, value, string.Empty, string.Empty, observedAt);
+        => AddReading(
+            sensorId, value, string.Empty, string.Empty,
+            0, 0, observedAt);
 
     public void AddReading(
         Guid sensorId,
@@ -42,10 +44,29 @@ public sealed class TelemetryHistoryService
         string metricName,
         string unit)
         => AddReading(
-            sensorId,
-            value,
-            metricName,
-            unit,
+            sensorId, value, metricName, unit,
+            0, 0, DateTimeOffset.UtcNow);
+
+    public void AddReading(
+        Guid sensorId,
+        double value,
+        string metricName,
+        string unit,
+        DateTimeOffset observedAt)
+        => AddReading(
+            sensorId, value, metricName, unit,
+            0, 0, observedAt);
+
+    public void AddReading(
+        Guid sensorId,
+        double value,
+        string metricName,
+        string unit,
+        double warningThreshold,
+        double criticalThreshold)
+        => AddReading(
+            sensorId, value, metricName, unit,
+            warningThreshold, criticalThreshold,
             DateTimeOffset.UtcNow);
 
     public void AddReading(
@@ -53,6 +74,8 @@ public sealed class TelemetryHistoryService
         double value,
         string metricName,
         string unit,
+        double warningThreshold,
+        double criticalThreshold,
         DateTimeOffset observedAt)
     {
         if (sensorId == Guid.Empty)
@@ -69,6 +92,14 @@ public sealed class TelemetryHistoryService
                 "Telemetry values must be finite numbers.");
         }
 
+        if (!double.IsFinite(warningThreshold) ||
+            !double.IsFinite(criticalThreshold))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(warningThreshold),
+                "Telemetry thresholds must be finite numbers.");
+        }
+
         ArgumentNullException.ThrowIfNull(metricName);
         ArgumentNullException.ThrowIfNull(unit);
 
@@ -77,7 +108,9 @@ public sealed class TelemetryHistoryService
             value,
             observedAt.ToUniversalTime(),
             metricName.Trim(),
-            unit.Trim());
+            unit.Trim(),
+            warningThreshold,
+            criticalThreshold);
 
         _history.GetOrAdd(
             sensorId,
@@ -158,8 +191,10 @@ public sealed class TelemetryHistoryService
              index++)
         {
             var matrixIndex = index - startIndex;
-            matrix[(int)(matrixIndex / columns), (int)(matrixIndex % columns)]
-                = readings[(int)index];
+
+            matrix[
+                (int)(matrixIndex / columns),
+                (int)(matrixIndex % columns)] = readings[(int)index];
         }
 
         return matrix;
@@ -237,4 +272,6 @@ public sealed record TelemetryHistoryReading(
     double Value,
     DateTimeOffset ObservedAt,
     string MetricName = "",
-    string Unit = "");
+    string Unit = "",
+    double WarningThreshold = 0,
+    double CriticalThreshold = 0);

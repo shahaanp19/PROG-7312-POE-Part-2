@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿
+using System.ComponentModel.DataAnnotations;
 
 namespace SmartX.Shared.DTOs;
 
@@ -8,10 +9,11 @@ public class TelemetryIngestionRequest
     public Guid SensorDeviceId { get; set; }
 
     [Required]
-    [StringLength(100)]
+    [StringLength(100, MinimumLength = 1)]
     public string MetricName { get; set; } = string.Empty;
 
-    [StringLength(50)]
+    [Required]
+    [StringLength(50, MinimumLength = 1)]
     public string Unit { get; set; } = string.Empty;
 
     public double Value { get; set; }

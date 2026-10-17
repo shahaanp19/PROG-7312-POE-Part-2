@@ -39,9 +39,7 @@ public sealed class RecommendationEngine
             .GroupBy(
                 x => $"{x.Title}|{x.DeviceId}",
                 StringComparer.OrdinalIgnoreCase)
-            .Select(group => group
-                .OrderBy(x => x.Severity)
-                .First())
+            .Select(group => group.OrderBy(x => x.Severity).First())
             .OrderBy(x => x.Severity)
             .ThenBy(x => x.Title, StringComparer.OrdinalIgnoreCase)
             .ThenBy(x => x.DeviceId)
@@ -54,8 +52,6 @@ public sealed class RecommendationEngine
         ICollection<SmartXRecommendation> recommendations,
         DateTime now)
     {
-        // Evaluate current health from the latest reading for each metric.
-        // Historical readings are analysed separately for trends.
         var latestReadings = observations
             .GroupBy(x => new
             {
@@ -103,89 +99,40 @@ public sealed class RecommendationEngine
                     item.DeviceId);
             }
 
-            if (normalized.Contains("temperature"))
+            if (TryGetRiskThresholds(
+                    item,
+                    normalized,
+                    out var warningThreshold,
+                    out var criticalThreshold,
+                    out var direction))
             {
-                if (item.Value >= 95)
-                {
-                    Add(
-                        recommendations,
-                        "Critical temperature",
-                        $"Temperature is {item.Value:0.##}{item.Unit}. Investigate overheating immediately.",
-                        RecommendationSeverity.Critical,
-                        item.DeviceId);
-                }
-                else if (item.Value >= 80)
-                {
-                    Add(
-                        recommendations,
-                        "Elevated temperature",
-                        $"Temperature is {item.Value:0.##}{item.Unit}. Inspect cooling and equipment load.",
-                        RecommendationSeverity.Warning,
-                        item.DeviceId);
-                }
-            }
+                var critical = direction == ThresholdDirection.Above
+                    ? item.Value >= criticalThreshold
+                    : item.Value <= criticalThreshold;
 
-            if (normalized.Contains("battery"))
-            {
-                if (item.Value <= 10)
-                {
-                    Add(
-                        recommendations,
-                        "Critical battery level",
-                        $"Battery is at {item.Value:0.##}{item.Unit}. Charge or replace it promptly.",
-                        RecommendationSeverity.Critical,
-                        item.DeviceId);
-                }
-                else if (item.Value <= 20)
-                {
-                    Add(
-                        recommendations,
-                        "Low battery level",
-                        $"Battery is at {item.Value:0.##}{item.Unit}. Schedule charging or replacement.",
-                        RecommendationSeverity.Warning,
-                        item.DeviceId);
-                }
-            }
+                var warning = direction == ThresholdDirection.Above
+                    ? item.Value >= warningThreshold
+                    : item.Value <= warningThreshold;
 
-            if (normalized.Contains("signal"))
-            {
-                if (item.Value <= -100)
-                {
-                    Add(
-                        recommendations,
-                        "Critical signal strength",
-                        $"Signal is {item.Value:0.##}{item.Unit}. Check antenna placement and network coverage.",
-                        RecommendationSeverity.Critical,
-                        item.DeviceId);
-                }
-                else if (item.Value <= -85)
-                {
-                    Add(
-                        recommendations,
-                        "Weak signal strength",
-                        $"Signal is {item.Value:0.##}{item.Unit}. Check interference and connectivity.",
-                        RecommendationSeverity.Warning,
-                        item.DeviceId);
-                }
-            }
+                var metricLabel = string.IsNullOrWhiteSpace(metric)
+                    ? "Telemetry"
+                    : metric;
 
-            if (normalized.Contains("humidity"))
-            {
-                if (item.Value >= 98)
+                if (critical)
                 {
                     Add(
                         recommendations,
-                        "Critical humidity",
-                        $"Humidity is {item.Value:0.##}{item.Unit}. Inspect moisture and condensation risks.",
+                        $"Critical {metricLabel}",
+                        $"{metricLabel} is {item.Value:0.##}{item.Unit}, beyond its configured critical threshold of {criticalThreshold:0.##}{item.Unit}. Investigate and take corrective action.",
                         RecommendationSeverity.Critical,
                         item.DeviceId);
                 }
-                else if (item.Value >= 90)
+                else if (warning)
                 {
                     Add(
                         recommendations,
-                        "High humidity",
-                        $"Humidity is {item.Value:0.##}{item.Unit}. Check ventilation and moisture control.",
+                        $"Elevated {metricLabel}",
+                        $"{metricLabel} is {item.Value:0.##}{item.Unit}, beyond its configured warning threshold of {warningThreshold:0.##}{item.Unit}. Inspect the device and monitor its readings.",
                         RecommendationSeverity.Warning,
                         item.DeviceId);
                 }
@@ -210,15 +157,15 @@ public sealed class RecommendationEngine
         {
             var readings = group
                 .GroupBy(x => AsUtc(x.ObservedAt))
-                .Select(timestampGroup => timestampGroup.First())
+                .Select(timestampGroup => timestampGroup
+                    .OrderByDescending(x => x.CriticalThreshold)
+                    .First())
                 .OrderBy(x => AsUtc(x.ObservedAt))
                 .TakeLast(6)
                 .ToList();
 
             if (readings.Count < 4)
-            {
                 continue;
-            }
 
             var first = readings[0];
             var last = readings[^1];
@@ -228,16 +175,10 @@ public sealed class RecommendationEngine
             var elapsedMinutes = (lastTime - firstTime).TotalMinutes;
 
             if (elapsedMinutes <= 0 || lastTime > now.AddMinutes(5))
-            {
                 continue;
-            }
 
-            // Do not forecast from readings that are no longer representative
-            // of the device's current state.
             if (now - lastTime > StaleThreshold)
-            {
                 continue;
-            }
 
             var change = last.Value - first.Value;
             var relativeChange = Math.Abs(change) /
@@ -262,9 +203,7 @@ public sealed class RecommendationEngine
                 (change < 0 && fallingMetric);
 
             if (!concerning || relativeChange < 0.10)
-            {
                 continue;
-            }
 
             var ratePerMinute = change / elapsedMinutes;
 
@@ -277,80 +216,115 @@ public sealed class RecommendationEngine
                     : RecommendationSeverity.Info,
                 group.Key.DeviceId);
 
-            if (TryGetRiskThreshold(
+            if (!TryGetRiskThresholds(
+                    last,
                     normalized,
-                    out var threshold,
+                    out _,
+                    out var criticalThreshold,
                     out var direction))
             {
-                var movingTowardThreshold =
-                    direction == ThresholdDirection.Above
-                        ? ratePerMinute > 0
-                        : ratePerMinute < 0;
-
-                if (!movingTowardThreshold)
-                {
-                    continue;
-                }
-
-                var minutesToThreshold =
-                    (threshold - last.Value) / ratePerMinute;
-
-                if (minutesToThreshold <= 0 ||
-                    minutesToThreshold > ForecastWindow.TotalMinutes)
-                {
-                    continue;
-                }
-
-                var severity = minutesToThreshold <= 5
-                    ? RecommendationSeverity.Critical
-                    : RecommendationSeverity.Warning;
-
-                Add(
-                    recommendations,
-                    $"{metric} threshold may be reached soon",
-                    $"Based on the recent trend, {metric} may reach {threshold:0.##}{last.Unit} in approximately {minutesToThreshold:0.#} minutes. This is a linear estimate, not a guarantee. Verify the reading and prepare a corrective action.",
-                    severity,
-                    group.Key.DeviceId);
+                continue;
             }
+
+            var movingTowardThreshold =
+                direction == ThresholdDirection.Above
+                    ? ratePerMinute > 0
+                    : ratePerMinute < 0;
+
+            if (!movingTowardThreshold)
+                continue;
+
+            var minutesToThreshold =
+                (criticalThreshold - last.Value) / ratePerMinute;
+
+            if (minutesToThreshold <= 0 ||
+                minutesToThreshold > ForecastWindow.TotalMinutes)
+            {
+                continue;
+            }
+
+            var severity = minutesToThreshold <= 5
+                ? RecommendationSeverity.Critical
+                : RecommendationSeverity.Warning;
+
+            Add(
+                recommendations,
+                $"{metric} critical threshold forecast",
+                $"Based on the recent trend, {metric} may reach its configured critical threshold of {criticalThreshold:0.##}{last.Unit} in approximately {minutesToThreshold:0.#} minutes. This is a linear estimate, not a guarantee. Verify the reading and prepare a corrective action.",
+                severity,
+                group.Key.DeviceId);
         }
     }
 
-    private static bool TryGetRiskThreshold(
-        string metric,
-        out double threshold,
+    private static bool TryGetRiskThresholds(
+        TelemetryObservation observation,
+        string normalizedMetric,
+        out double warningThreshold,
+        out double criticalThreshold,
         out ThresholdDirection direction)
     {
-        if (metric.Contains("temperature"))
-        {
-            threshold = 95;
-            direction = ThresholdDirection.Above;
-            return true;
-        }
+        warningThreshold = observation.WarningThreshold;
+        criticalThreshold = observation.CriticalThreshold;
 
-        if (metric.Contains("battery"))
+        if (normalizedMetric.Contains("battery") ||
+            normalizedMetric.Contains("signal"))
         {
-            threshold = 10;
             direction = ThresholdDirection.Below;
+
+            if (HasConfiguredThresholds(warningThreshold, criticalThreshold))
+                return true;
+
+            if (normalizedMetric.Contains("battery"))
+            {
+                warningThreshold = 20;
+                criticalThreshold = 10;
+                return true;
+            }
+
+            warningThreshold = -85;
+            criticalThreshold = -100;
             return true;
         }
 
-        if (metric.Contains("signal"))
+        if (normalizedMetric.Contains("temperature") ||
+            normalizedMetric.Contains("humidity") ||
+            normalizedMetric.Contains("pressure") ||
+            normalizedMetric.Contains("power") ||
+            normalizedMetric.Contains("voltage"))
         {
-            threshold = -100;
-            direction = ThresholdDirection.Below;
-            return true;
-        }
-
-        if (metric.Contains("humidity"))
-        {
-            threshold = 98;
             direction = ThresholdDirection.Above;
-            return true;
+
+            if (HasConfiguredThresholds(warningThreshold, criticalThreshold))
+                return true;
+
+            if (normalizedMetric.Contains("temperature"))
+            {
+                warningThreshold = 80;
+                criticalThreshold = 95;
+                return true;
+            }
+
+            if (normalizedMetric.Contains("humidity"))
+            {
+                warningThreshold = 90;
+                criticalThreshold = 98;
+                return true;
+            }
+
+            return false;
         }
 
-        threshold = 0;
         direction = ThresholdDirection.Above;
         return false;
+    }
+
+    private static bool HasConfiguredThresholds(
+        double warningThreshold,
+        double criticalThreshold)
+    {
+        return double.IsFinite(warningThreshold) &&
+               double.IsFinite(criticalThreshold) &&
+               (warningThreshold != 0 || criticalThreshold != 0);
     }
 
     private void AnalyzeCommandQueue(
@@ -361,13 +335,11 @@ public sealed class RecommendationEngine
 
         var criticalCount = queue.Count(x =>
             x.Priority.ToString().Contains(
-                "Critical",
-                StringComparison.OrdinalIgnoreCase));
+                "Critical", StringComparison.OrdinalIgnoreCase));
 
         var highCount = queue.Count(x =>
             x.Priority.ToString().Contains(
-                "High",
-                StringComparison.OrdinalIgnoreCase));
+                "High", StringComparison.OrdinalIgnoreCase));
 
         if (criticalCount > 0)
         {
@@ -425,9 +397,7 @@ public sealed class RecommendationEngine
             var age = now - AsUtc(command.CreatedAt);
 
             if (age <= TimeSpan.FromMinutes(10))
-            {
                 continue;
-            }
 
             Add(
                 recommendations,
@@ -448,8 +418,7 @@ public sealed class RecommendationEngine
 
         foreach (var group in history
             .Where(x => x.Status.ToString().Contains(
-                "Fail",
-                StringComparison.OrdinalIgnoreCase))
+                "Fail", StringComparison.OrdinalIgnoreCase))
             .GroupBy(x => new
             {
                 x.DeviceId,
@@ -466,7 +435,6 @@ public sealed class RecommendationEngine
         }
 
         var oneHourAgo = now.AddHours(-1);
-
         var recentCount = history.Count(x =>
             AsUtc(x.CreatedAt) >= oneHourAgo);
 
@@ -514,9 +482,7 @@ public sealed class RecommendationEngine
         ICollection<SmartXRecommendation> recommendations)
     {
         if (string.IsNullOrWhiteSpace(searchQuery))
-        {
             return;
-        }
 
         var query = searchQuery.Trim().ToLowerInvariant();
 
@@ -580,9 +546,7 @@ public sealed class RecommendationEngine
     private static Guid? ToDeviceId(object? value)
     {
         if (value is Guid id)
-        {
             return id == Guid.Empty ? null : id;
-        }
 
         if (value is string text &&
             Guid.TryParse(text, out var parsed) &&
@@ -628,6 +592,10 @@ public sealed class TelemetryObservation
     public string Unit { get; init; } = string.Empty;
 
     public DateTime ObservedAt { get; init; }
+
+    public double WarningThreshold { get; init; }
+
+    public double CriticalThreshold { get; init; }
 }
 
 public sealed class SmartXRecommendation
