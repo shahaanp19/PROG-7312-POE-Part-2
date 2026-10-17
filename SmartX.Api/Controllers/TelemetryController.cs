@@ -182,13 +182,15 @@ public class TelemetryController : ControllerBase
 
         var observedAt = DateTimeOffset.UtcNow;
 
-        // Preserve finite readings for predictive analysis, even when
-        // the ingestion service subsequently flags them as anomalous.
+        // Preserve the configured thresholds alongside each reading
+        // so the predictive engine can evaluate sensor-specific limits.
         _historyService?.AddReading(
             request.SensorDeviceId,
             request.Value,
             metricName,
             unit,
+            request.WarningThreshold,
+            request.CriticalThreshold,
             observedAt);
 
         var result = _ingestionService.Process(metric, request.Value);
