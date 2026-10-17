@@ -16,7 +16,6 @@ public class TelemetryController : ControllerBase
     private readonly TelemetryBatchProcessor _batchProcessor;
     private readonly TelemetryHistoryService? _historyService;
 
-    // Maintains compatibility with existing unit tests.
     public TelemetryController(
         TelemetryIngestionService ingestionService,
         RecursiveDeploymentValidator deploymentValidator,
@@ -31,7 +30,6 @@ public class TelemetryController : ControllerBase
     {
     }
 
-    // Constructor used by ASP.NET Core dependency injection.
     public TelemetryController(
         TelemetryIngestionService ingestionService,
         RecursiveDeploymentValidator deploymentValidator,
@@ -41,16 +39,12 @@ public class TelemetryController : ControllerBase
     {
         _ingestionService = ingestionService
             ?? throw new ArgumentNullException(nameof(ingestionService));
-
         _deploymentValidator = deploymentValidator
             ?? throw new ArgumentNullException(nameof(deploymentValidator));
-
         _sensorRegistry = sensorRegistry
             ?? throw new ArgumentNullException(nameof(sensorRegistry));
-
         _batchProcessor = batchProcessor
             ?? throw new ArgumentNullException(nameof(batchProcessor));
-
         _historyService = historyService;
     }
 
@@ -78,9 +72,7 @@ public class TelemetryController : ControllerBase
         }
 
         if (!ModelState.IsValid)
-        {
             return ValidationProblem(ModelState);
-        }
 
         if (request.SensorDeviceId == Guid.Empty)
         {
@@ -153,11 +145,14 @@ public class TelemetryController : ControllerBase
             });
         }
 
+        var metricName = request.MetricName.Trim();
+        var unit = request.Unit.Trim();
+
         var metric = new TelemetryMetric
         {
             SensorDeviceId = request.SensorDeviceId,
-            MetricName = request.MetricName.Trim(),
-            Unit = request.Unit.Trim(),
+            MetricName = metricName,
+            Unit = unit,
             MinimumExpectedValue = request.MinimumExpectedValue,
             MaximumExpectedValue = request.MaximumExpectedValue,
             WarningThreshold = request.WarningThreshold,
@@ -168,15 +163,16 @@ public class TelemetryController : ControllerBase
         var result = _ingestionService.Process(metric, request.Value);
 
         if (!result.Success)
-        {
             return UnprocessableEntity(result);
-        }
 
-        // Store accepted readings for subsequent predictive analysis.
+        var observedAt = DateTimeOffset.UtcNow;
+
         _historyService?.AddReading(
             request.SensorDeviceId,
             request.Value,
-            DateTimeOffset.UtcNow);
+            metricName,
+            unit,
+            observedAt);
 
         return Ok(result);
     }
@@ -188,24 +184,15 @@ public class TelemetryController : ControllerBase
 
         var temperature =
             new SmartX.Shared.Generics.TelemetryPacket<float>(
-                sensorId,
-                "Temperature",
-                24.5f,
-                "°C");
+                sensorId, "Temperature", 24.5f, "°C");
 
         var power =
             new SmartX.Shared.Generics.TelemetryPacket<int>(
-                sensorId,
-                "Power",
-                850,
-                "W");
+                sensorId, "Power", 850, "W");
 
         var relay =
             new SmartX.Shared.Generics.TelemetryPacket<bool>(
-                sensorId,
-                "Relay",
-                true,
-                "state");
+                sensorId, "Relay", true, "state");
 
         var readingOne = new MeterReading(sensorId, 120.5, "W");
         var readingTwo = new MeterReading(sensorId, 80.25, "W");
@@ -330,11 +317,8 @@ public class TelemetryController : ControllerBase
         };
 
         const string targetNode = "Temperature Sensor";
-
         var isValid = _deploymentValidator.ValidateNode(
-            facility,
-            targetNode,
-            out var path);
+            facility, targetNode, out var path);
 
         return Ok(new
         {
@@ -387,11 +371,8 @@ public class TelemetryController : ControllerBase
         };
 
         const string targetNode = "Hidden Sensor";
-
         var isValid = _deploymentValidator.ValidateNode(
-            facility,
-            targetNode,
-            out var path);
+            facility, targetNode, out var path);
 
         return Ok(new
         {
@@ -433,11 +414,8 @@ public class TelemetryController : ControllerBase
         };
 
         const string targetNode = "Nonexistent Sensor";
-
         var isValid = _deploymentValidator.ValidateNode(
-            facility,
-            targetNode,
-            out var path);
+            facility, targetNode, out var path);
 
         return Ok(new
         {
@@ -464,10 +442,8 @@ public class TelemetryController : ControllerBase
 
         var packets = _batchProcessor.ProcessHistoricalBatches(
             historicalBatches);
-
         var matrix = _batchProcessor.CreateTelemetryMatrix(
             historicalBatches);
-
         var flattened = _batchProcessor.FlattenTelemetryBatches(
             historicalBatches);
 
@@ -480,9 +456,7 @@ public class TelemetryController : ControllerBase
             var rowData = new float[matrixColumns];
 
             for (var column = 0; column < matrixColumns; column++)
-            {
                 rowData[column] = matrix[row, column];
-            }
 
             matrixData.Add(rowData);
         }
@@ -494,14 +468,9 @@ public class TelemetryController : ControllerBase
         for (var index = 0; index < historicalBatches.Length; index++)
         {
             var size = historicalBatches[index]?.Length ?? 0;
-
             batchSizes[index] = size;
             totalReadings += size;
-
-            if (size > largestBatchSize)
-            {
-                largestBatchSize = size;
-            }
+            largestBatchSize = Math.Max(largestBatchSize, size);
         }
 
         return Ok(new

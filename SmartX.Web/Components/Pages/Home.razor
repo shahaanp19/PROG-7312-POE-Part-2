@@ -1,10 +1,13 @@
 ﻿@page "/sensor-dashboard"
 
 @using System.Net.Http.Json
+@using System.Text.Json
 @using SmartX.Shared.Models
+@using SmartX.Web.Services
 @using Microsoft.AspNetCore.Components.Routing
 
 @inject IHttpClientFactory HttpClientFactory
+@inject RecommendationEngine RecommendationEngine
 @implements IDisposable
 
 <div class="sx-page">
@@ -23,8 +26,7 @@
 
             <p class="sx-hero-description">
                 Centralised telemetry monitoring, sensor management,
-                and intelligent incident prioritisation for distributed
-                IoT environments.
+                predictive operational intelligence, and incident prioritisation.
             </p>
 
             <div class="sx-hero-meta">
@@ -41,9 +43,7 @@
         <div class="sx-hero-visual" aria-hidden="true">
             <div class="sx-orbit sx-orbit-one"></div>
             <div class="sx-orbit sx-orbit-two"></div>
-            <div class="sx-core">
-                <span>SX</span>
-            </div>
+            <div class="sx-core"><span>SX</span></div>
             <div class="sx-signal sx-signal-one"></div>
             <div class="sx-signal sx-signal-two"></div>
             <div class="sx-signal sx-signal-three"></div>
@@ -55,10 +55,7 @@
             <div>
                 <span class="sx-section-kicker">01 / SYSTEM STATUS</span>
                 <h2>Gateway Control Centre</h2>
-                <p>
-                    Monitor the connection between the Smart-X client
-                    interface and the ingestion API.
-                </p>
+                <p>Monitor the connection between the Smart-X client and ingestion API.</p>
             </div>
 
             <button class="sx-button sx-button-primary"
@@ -72,8 +69,7 @@
         @if (!string.IsNullOrWhiteSpace(ConnectionMessage))
         {
             <div class="sx-feedback @(GatewayOnline ? "success" : "error")"
-                 role="status"
-                 aria-live="polite">
+                 role="status" aria-live="polite">
                 <span class="sx-feedback-icon">@(GatewayOnline ? "✓" : "!")</span>
                 <span>@ConnectionMessage</span>
             </div>
@@ -83,18 +79,136 @@
     <section class="sx-section">
         <div class="sx-section-heading">
             <div>
-                <span class="sx-section-kicker">02 / INTELLIGENT MONITORING</span>
-                <h2>Incident Engagement Centre</h2>
+                <span class="sx-section-kicker">02 / PREDICTIVE INTELLIGENCE</span>
+                <h2>Predictive Action and Suggestion Engine</h2>
                 <p>
-                    Dynamic attention management prioritises operational
-                    incidents according to severity and current system state.
+                    Analyses recent sensor readings, detects abnormal values and
+                    emerging trends, and recommends proactive operational actions.
                 </p>
             </div>
 
             <div class="sx-live-label">
                 <span></span>
-                LIVE MONITORING
+                @(IsLoadingRecommendations ? "ANALYSING" : "LIVE ANALYSIS")
             </div>
+        </div>
+
+        <div class="sx-kpi-grid">
+            <article class="sx-kpi-card">
+                <span class="sx-kpi-label">SENSORS ANALYSED</span>
+                <strong>@SensorsAnalysed</strong>
+                <span class="sx-kpi-description">Sensors with recent telemetry</span>
+            </article>
+
+            <article class="sx-kpi-card">
+                <span class="sx-kpi-label">READINGS PROCESSED</span>
+                <strong>@ReadingsAnalysed</strong>
+                <span class="sx-kpi-description">Timestamped observations</span>
+            </article>
+
+            <article class="sx-kpi-card sx-kpi-critical">
+                <span class="sx-kpi-label">CRITICAL ACTIONS</span>
+                <strong>@CriticalRecommendationCount</strong>
+                <span class="sx-kpi-description">Immediate intervention suggested</span>
+            </article>
+
+            <article class="sx-kpi-card sx-kpi-warning">
+                <span class="sx-kpi-label">WARNINGS</span>
+                <strong>@WarningRecommendationCount</strong>
+                <span class="sx-kpi-description">Risks requiring investigation</span>
+            </article>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(RecommendationMessage))
+        {
+            <div class="sx-feedback @(RecommendationLoadFailed ? "error" : "success")"
+                 role="status" aria-live="polite">
+                <span class="sx-feedback-icon">@(RecommendationLoadFailed ? "!" : "i")</span>
+                <span>@RecommendationMessage</span>
+            </div>
+        }
+
+        @if (IsLoadingRecommendations && Recommendations.Count == 0)
+        {
+            <div class="sx-loading-card">
+                <div class="sx-spinner"></div>
+                <div>
+                    <strong>Analysing telemetry</strong>
+                    <span>Evaluating available sensor readings and operational risk...</span>
+                </div>
+            </div>
+        }
+        else if (Recommendations.Count == 0 && !RecommendationLoadFailed)
+        {
+            <div class="sx-empty-state">
+                <div class="sx-empty-icon">✓</div>
+                <strong>No predictive actions identified</strong>
+                <span>
+                    No current recommendations were generated from the available
+                    telemetry and operational state.
+                </span>
+            </div>
+        }
+        else if (Recommendations.Count > 0)
+        {
+            <div class="sx-issue-grid">
+                @foreach (var recommendation in Recommendations)
+                {
+                    <article class="sx-issue-card"
+                             @key="RecommendationKey(recommendation)">
+                        <div class="sx-issue-top">
+                            <span class="sx-severity @GetRecommendationSeverityClass(recommendation.Severity)">
+                                @recommendation.Severity
+                            </span>
+
+                            <span class="sx-issue-status">
+                                @(recommendation.DeviceId.HasValue
+                                    ? "DEVICE-SPECIFIC"
+                                    : "SYSTEM-WIDE")
+                            </span>
+                        </div>
+
+                        <h3>@recommendation.Title</h3>
+                        <p>@recommendation.Description</p>
+
+                        @if (recommendation.DeviceId.HasValue)
+                        {
+                            <div class="sx-issue-meta">
+                                <span>SENSOR ID</span>
+                                <strong>@recommendation.DeviceId.Value</strong>
+                            </div>
+                        }
+
+                        <div class="sx-issue-meta">
+                            <span>RECOMMENDED ACTION</span>
+                            <strong>@GetRecommendedAction(recommendation)</strong>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+
+        @if (LastTelemetryAnalysisUtc.HasValue)
+        {
+            <p class="sx-card-subtext">
+                Last analysis: @LastTelemetryAnalysisUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+                · Automatic refresh every 10 seconds
+            </p>
+        }
+    </section>
+
+    <section class="sx-section">
+        <div class="sx-section-heading">
+            <div>
+                <span class="sx-section-kicker">03 / INTELLIGENT MONITORING</span>
+                <h2>Incident Engagement Centre</h2>
+                <p>
+                    Dynamic attention management prioritises operational incidents
+                    according to severity and current system state.
+                </p>
+            </div>
+
+            <div class="sx-live-label"><span></span>LIVE MONITORING</div>
         </div>
 
         @if (IsLoadingEngagement && EngagementSnapshot is null)
@@ -112,18 +226,13 @@
             <div class="sx-attention-card">
                 <div>
                     <span class="sx-card-kicker">CURRENT ATTENTION LEVEL</span>
-                    <strong class="sx-attention-value">
-                        @EngagementSnapshot.AttentionLevel
-                    </strong>
+                    <strong class="sx-attention-value">@EngagementSnapshot.AttentionLevel</strong>
                     <span class="sx-card-subtext">
-                        Snapshot generated
-                        @EngagementSnapshot.GeneratedAtUtc.ToLocalTime()
+                        Snapshot generated @EngagementSnapshot.GeneratedAtUtc.ToLocalTime()
                     </span>
                 </div>
 
-                <div class="sx-attention-indicator">
-                    <span></span>
-                </div>
+                <div class="sx-attention-indicator"><span></span></div>
             </div>
 
             <div class="sx-kpi-grid">
@@ -174,8 +283,7 @@
                             @EngagementSnapshot.CriticalOpenIssues critical
                             @(EngagementSnapshot.CriticalOpenIssues == 1
                                 ? "incident requires"
-                                : "incidents require")
-                            immediate attention.
+                                : "incidents require") immediate attention.
                         </p>
                     </div>
                 </div>
@@ -190,8 +298,7 @@
                             @EngagementSnapshot.WarningOpenIssues warning
                             @(EngagementSnapshot.WarningOpenIssues == 1
                                 ? "incident remains"
-                                : "incidents remain")
-                            under observation.
+                                : "incidents remain") under observation.
                         </p>
                     </div>
                 </div>
@@ -202,13 +309,7 @@
                     <div class="sx-alert-icon">i</div>
                     <div>
                         <strong>Monitoring active</strong>
-                        <p>
-                            @EngagementSnapshot.OpenIssues open
-                            @(EngagementSnapshot.OpenIssues == 1
-                                ? "incident is"
-                                : "incidents are")
-                            currently being monitored.
-                        </p>
+                        <p>@EngagementSnapshot.OpenIssues open incident(s) currently being monitored.</p>
                     </div>
                 </div>
             }
@@ -230,12 +331,9 @@
         <section class="sx-section">
             <div class="sx-section-heading">
                 <div>
-                    <span class="sx-section-kicker">03 / PRIORITY ENGINE</span>
+                    <span class="sx-section-kicker">04 / PRIORITY ENGINE</span>
                     <h2>Priority Attention Queue</h2>
-                    <p>
-                        Highest-risk incidents are surfaced first to reduce
-                        investigation time and improve operational response.
-                    </p>
+                    <p>Highest-risk incidents are surfaced first.</p>
                 </div>
             </div>
 
@@ -254,9 +352,7 @@
                     {
                         <article class="sx-issue-card" @key="issue.Id">
                             <div class="sx-issue-top">
-                                <span class="sx-severity sx-severity-@issue.Severity.ToLowerInvariant()">
-                                    @issue.Severity
-                                </span>
+                                <span class="sx-severity sx-severity-@issue.Severity.ToLowerInvariant()">@issue.Severity</span>
                                 <span class="sx-issue-status">@issue.Status</span>
                             </div>
 
@@ -286,22 +382,17 @@
     <section class="sx-section">
         <div class="sx-section-heading">
             <div>
-                <span class="sx-section-kicker">04 / INVESTIGATION</span>
+                <span class="sx-section-kicker">05 / INVESTIGATION</span>
                 <h2>Interactive Incident Triage</h2>
-                <p>
-                    Search, filter, and sort incidents to isolate the information
-                    required during operational investigation.
-                </p>
+                <p>Search, filter, and sort incidents during operational investigation.</p>
             </div>
         </div>
 
         <div class="sx-filter-panel">
             <div class="sx-field">
                 <label for="issueSearch">Search incidents</label>
-                <input id="issueSearch"
-                       class="sx-input"
-                       @bind="SearchText"
-                       @bind:event="oninput"
+                <input id="issueSearch" class="sx-input"
+                       @bind="SearchText" @bind:event="oninput"
                        placeholder="Search title or description..." />
             </div>
 
@@ -343,30 +434,25 @@
     <section class="sx-section">
         <div class="sx-section-heading">
             <div>
-                <span class="sx-section-kicker">05 / OPERATOR INPUT</span>
+                <span class="sx-section-kicker">06 / OPERATOR INPUT</span>
                 <h2>Report an Issue</h2>
-                <p>
-                    Create an operational incident and feed it into the
-                    Smart-X engagement prioritisation engine.
-                </p>
+                <p>Create an operational incident in the engagement system.</p>
             </div>
         </div>
 
         <div class="sx-form-panel">
             <div class="sx-field sx-field-wide">
                 <label for="issueTitle">Issue title</label>
-                <input id="issueTitle"
-                       class="sx-input"
+                <input id="issueTitle" class="sx-input"
                        @bind="NewIssueTitle"
                        placeholder="e.g. Soil moisture sensor reporting abnormal values" />
             </div>
 
             <div class="sx-field sx-field-wide">
                 <label for="issueDescription">Description</label>
-                <textarea id="issueDescription"
-                          class="sx-input sx-textarea"
+                <textarea id="issueDescription" class="sx-input sx-textarea"
                           @bind="NewIssueDescription"
-                          placeholder="Describe the observed behaviour, affected device, or operational concern"></textarea>
+                          placeholder="Describe the observed behaviour or operational concern"></textarea>
             </div>
 
             <div class="sx-field">
@@ -380,8 +466,7 @@
 
             <div class="sx-form-action">
                 <button class="sx-button sx-button-primary"
-                        @onclick="ReportIssueAsync"
-                        disabled="@IsReportingIssue">
+                        @onclick="ReportIssueAsync" disabled="@IsReportingIssue">
                     @(IsReportingIssue ? "Reporting..." : "Report Incident")
                 </button>
             </div>
@@ -391,15 +476,12 @@
     <section class="sx-section">
         <div class="sx-section-heading">
             <div>
-                <span class="sx-section-kicker">06 / LIVE OPERATIONS</span>
+                <span class="sx-section-kicker">07 / LIVE OPERATIONS</span>
                 <h2>Live Incident Board</h2>
                 <p>Current incident activity across the Smart-X environment.</p>
             </div>
 
-            <div class="sx-live-label">
-                <span></span>
-                AUTO REFRESH / 10 SEC
-            </div>
+            <div class="sx-live-label"><span></span>AUTO REFRESH / 10 SEC</div>
         </div>
 
         @if (IsLoadingIssues)
@@ -427,9 +509,7 @@
                 {
                     <article class="sx-issue-card" @key="issue.Id">
                         <div class="sx-issue-top">
-                            <span class="sx-severity sx-severity-@issue.Severity.ToLowerInvariant()">
-                                @issue.Severity
-                            </span>
+                            <span class="sx-severity sx-severity-@issue.Severity.ToLowerInvariant()">@issue.Severity</span>
                             <span class="sx-issue-status">@issue.Status</span>
                         </div>
 
@@ -464,9 +544,9 @@
         <section class="sx-section">
             <div class="sx-section-heading">
                 <div>
-                    <span class="sx-section-kicker">07 / AUDIT ACTIVITY</span>
+                    <span class="sx-section-kicker">08 / AUDIT ACTIVITY</span>
                     <h2>Recent Engagement Activity</h2>
-                    <p>Recent events provide operational context for changing gateway conditions.</p>
+                    <p>Recent events provide context for changing gateway conditions.</p>
                 </div>
             </div>
 
@@ -484,13 +564,10 @@
                     {
                         <article class="sx-timeline-item" @key="issue.Id">
                             <div class="sx-timeline-marker"></div>
-
                             <div class="sx-timeline-content">
                                 <div class="sx-timeline-heading">
                                     <h3>@issue.Title</h3>
-                                    <span class="sx-severity sx-severity-@issue.Severity.ToLowerInvariant()">
-                                        @issue.Severity
-                                    </span>
+                                    <span class="sx-severity sx-severity-@issue.Severity.ToLowerInvariant()">@issue.Severity</span>
                                 </div>
 
                                 <div class="sx-timeline-meta">
@@ -509,8 +586,7 @@
     @if (!string.IsNullOrWhiteSpace(DashboardMessage))
     {
         <div class="sx-feedback @(DashboardMessageCssClass == "connection-success" ? "success" : "error")"
-             role="status"
-             aria-live="polite">
+             role="status" aria-live="polite">
             <span class="sx-feedback-icon">
                 @(DashboardMessageCssClass == "connection-success" ? "✓" : "!")
             </span>
@@ -523,10 +599,7 @@
             <div>
                 <span class="sx-section-kicker">SMART-X / ARCHITECTURE</span>
                 <h2>System Capabilities</h2>
-                <p>
-                    The Smart-X platform is being developed as a modular
-                    IoT ecosystem across three architectural pillars.
-                </p>
+                <p>The Smart-X platform integrates telemetry, command execution, and mesh routing.</p>
             </div>
         </div>
 
@@ -536,13 +609,8 @@
                 <div class="sx-feature-icon">SD</div>
                 <span class="sx-feature-status">ACTIVE</span>
                 <h3>Sensor Data Ingestion</h3>
-                <p>
-                    Register distributed sensors, submit telemetry,
-                    validate incoming values, and monitor gateway activity.
-                </p>
-                <NavLink href="/"
-                         Match="NavLinkMatch.All"
-                         class="sx-feature-link">
+                <p>Register sensors, submit telemetry, validate values, and monitor gateway activity.</p>
+                <NavLink href="/" Match="NavLinkMatch.All" class="sx-feature-link">
                     Open Sensor Dashboard →
                 </NavLink>
             </article>
@@ -552,13 +620,8 @@
                 <div class="sx-feature-icon">CS</div>
                 <span class="sx-feature-status">ACTIVE</span>
                 <h3>Command Stream &amp; History</h3>
-                <p>
-                    Manage real-time commands, FIFO processing, priority
-                    execution, undo operations, and command audit history.
-                </p>
-                <NavLink href="/commands"
-                         Match="NavLinkMatch.Prefix"
-                         class="sx-feature-link">
+                <p>Manage commands, FIFO processing, priority execution, undo operations, and audit history.</p>
+                <NavLink href="/commands" Match="NavLinkMatch.Prefix" class="sx-feature-link">
                     Open Command Centre →
                 </NavLink>
             </article>
@@ -568,10 +631,7 @@
                 <div class="sx-feature-icon">NT</div>
                 <span class="sx-feature-status disabled">FINAL PoE</span>
                 <h3>Network Topology &amp; Mesh Routing</h3>
-                <p>
-                    Mesh topology visualisation and intelligent routing
-                    capabilities will complete the Smart-X ecosystem.
-                </p>
+                <p>Mesh topology visualisation and intelligent routing capabilities will complete the ecosystem.</p>
                 <span class="sx-feature-disabled">Coming Later</span>
             </article>
         </div>
@@ -604,6 +664,14 @@
     private string NewIssueDescription = string.Empty;
     private string NewIssueSeverity = "Info";
 
+    private List<SmartXRecommendation> Recommendations = new();
+    private bool IsLoadingRecommendations;
+    private bool RecommendationLoadFailed;
+    private string? RecommendationMessage;
+    private int SensorsAnalysed;
+    private int ReadingsAnalysed;
+    private DateTimeOffset? LastTelemetryAnalysisUtc;
+
     private PeriodicTimer? _refreshTimer;
     private CancellationTokenSource? _refreshCancellation;
     private Task? _refreshTask;
@@ -620,28 +688,20 @@
                 var search = SearchText.Trim();
 
                 result = result.Where(issue =>
-                    (issue.Title?.Contains(
-                        search,
-                        StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (issue.Description?.Contains(
-                        search,
-                        StringComparison.OrdinalIgnoreCase) ?? false));
+                    (issue.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (issue.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
             }
 
             if (!SelectedSeverity.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
                 result = result.Where(issue =>
-                    issue.Severity.Equals(
-                        SelectedSeverity,
-                        StringComparison.OrdinalIgnoreCase));
+                    issue.Severity.Equals(SelectedSeverity, StringComparison.OrdinalIgnoreCase));
             }
 
             if (!SelectedStatus.Equals("All", StringComparison.OrdinalIgnoreCase))
             {
                 result = result.Where(issue =>
-                    issue.Status.Equals(
-                        SelectedStatus,
-                        StringComparison.OrdinalIgnoreCase));
+                    issue.Status.Equals(SelectedStatus, StringComparison.OrdinalIgnoreCase));
             }
 
             return SelectedSort switch
@@ -655,6 +715,12 @@
             };
         }
     }
+
+    private int CriticalRecommendationCount =>
+        Recommendations.Count(item => item.Severity == RecommendationSeverity.Critical);
+
+    private int WarningRecommendationCount =>
+        Recommendations.Count(item => item.Severity == RecommendationSeverity.Warning);
 
     protected override async Task OnInitializedAsync()
     {
@@ -673,6 +739,28 @@
             "info" => 1,
             _ => 0
         };
+
+    private static string GetRecommendationSeverityClass(RecommendationSeverity severity) =>
+        severity switch
+        {
+            RecommendationSeverity.Critical => "sx-severity-critical",
+            RecommendationSeverity.Warning => "sx-severity-warning",
+            _ => "sx-severity-info"
+        };
+
+    private static string RecommendationKey(SmartXRecommendation recommendation) =>
+        $"{recommendation.Title}|{recommendation.DeviceId}";
+
+    private static string GetRecommendedAction(SmartXRecommendation recommendation)
+    {
+        if (recommendation.Severity == RecommendationSeverity.Critical)
+            return "Investigate immediately";
+
+        if (recommendation.Severity == RecommendationSeverity.Warning)
+            return "Inspect and monitor";
+
+        return "Review during routine checks";
+    }
 
     private async Task CheckGatewayAsync()
     {
@@ -698,12 +786,12 @@
                 GatewayStatus = "Gateway Online";
                 ConnectionMessage = "Successfully connected to the Smart-X API.";
                 await LoadEngagementAsync();
+                await LoadPredictiveRecommendationsAsync();
             }
             else
             {
                 GatewayStatus = "Gateway Error";
-                ConnectionMessage =
-                    $"The Smart-X API returned HTTP {(int)response.StatusCode}.";
+                ConnectionMessage = $"The Smart-X API returned HTTP {(int)response.StatusCode}.";
             }
         }
         catch (OperationCanceledException)
@@ -758,7 +846,7 @@
             DashboardMessage = "Unable to refresh dashboard engagement data.";
             DashboardMessageCssClass = "connection-error";
         }
-        catch (System.Text.Json.JsonException)
+        catch (JsonException)
         {
             DashboardMessage = "The engagement API returned invalid data.";
             DashboardMessageCssClass = "connection-error";
@@ -768,6 +856,77 @@
             IsLoadingEngagement = false;
             IsLoadingIssues = false;
             _refreshLock.Release();
+        }
+    }
+
+    private async Task LoadPredictiveRecommendationsAsync()
+    {
+        if (IsLoadingRecommendations)
+            return;
+
+        IsLoadingRecommendations = true;
+        RecommendationLoadFailed = false;
+        RecommendationMessage = null;
+
+        try
+        {
+            var client = HttpClientFactory.CreateClient("SmartXApi");
+
+            var readings = await client.GetFromJsonAsync<List<TelemetryHistoryDto>>(
+                "api/telemetry-history/recent?countPerSensor=100");
+
+            readings ??= new List<TelemetryHistoryDto>();
+
+            var validReadings = readings
+                .Where(reading =>
+                    reading.SensorId != Guid.Empty &&
+                    double.IsFinite(reading.Value) &&
+                    !string.IsNullOrWhiteSpace(reading.MetricName))
+                .ToList();
+
+            var observations = validReadings
+                .Select(reading => new TelemetryObservation
+                {
+                    DeviceId = reading.SensorId,
+                    Metric = reading.MetricName,
+                    Value = reading.Value,
+                    Unit = reading.Unit ?? string.Empty,
+                    ObservedAt = reading.ObservedAt.UtcDateTime
+                })
+                .ToList();
+
+            var generated = RecommendationEngine.Generate(observations);
+
+            Recommendations = generated
+                .OrderBy(item => item.Severity)
+                .ThenBy(item => item.Title)
+                .ToList();
+
+            SensorsAnalysed = observations
+                .Select(item => item.DeviceId)
+                .Distinct()
+                .Count();
+
+            ReadingsAnalysed = observations.Count;
+            LastTelemetryAnalysisUtc = DateTimeOffset.UtcNow;
+
+            RecommendationMessage = observations.Count == 0
+                ? "No usable timestamped telemetry is available yet. Submit readings through the telemetry ingestion endpoint to enable data-driven predictions."
+                : $"Analysed {ReadingsAnalysed} readings across {SensorsAnalysed} sensors.";
+        }
+        catch (HttpRequestException)
+        {
+            RecommendationLoadFailed = true;
+            RecommendationMessage = "Predictive analysis could not retrieve telemetry history from the API.";
+        }
+        catch (JsonException)
+        {
+            RecommendationLoadFailed = true;
+            RecommendationMessage = "The telemetry history API returned data in an unexpected format.";
+        }
+        finally
+        {
+            IsLoadingRecommendations = false;
         }
     }
 
@@ -807,9 +966,7 @@
 
             if (!response.IsSuccessStatusCode)
             {
-                SetDashboardMessage(
-                    $"Issue could not be reported. HTTP {(int)response.StatusCode}.",
-                    false);
+                SetDashboardMessage($"Issue could not be reported. HTTP {(int)response.StatusCode}.", false);
                 return;
             }
 
@@ -817,10 +974,7 @@
             NewIssueDescription = string.Empty;
             NewIssueSeverity = "Info";
 
-            SetDashboardMessage(
-                "Incident added to the live engagement system.",
-                true);
-
+            SetDashboardMessage("Incident added to the live engagement system.", true);
             await LoadEngagementAsync();
         }
         catch (HttpRequestException)
@@ -850,16 +1004,11 @@
 
             if (!response.IsSuccessStatusCode)
             {
-                SetDashboardMessage(
-                    $"Issue could not be resolved. HTTP {(int)response.StatusCode}.",
-                    false);
+                SetDashboardMessage($"Issue could not be resolved. HTTP {(int)response.StatusCode}.", false);
                 return;
             }
 
-            SetDashboardMessage(
-                "Incident resolved and engagement priorities updated.",
-                true);
-
+            SetDashboardMessage("Incident resolved and engagement priorities updated.", true);
             await LoadEngagementAsync();
         }
         catch (HttpRequestException)
@@ -884,7 +1033,6 @@
     {
         _refreshCancellation = new CancellationTokenSource();
         _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(10));
-
         _refreshTask = RefreshLoopAsync(_refreshCancellation.Token);
     }
 
@@ -903,17 +1051,18 @@
                 await InvokeAsync(async () =>
                 {
                     await LoadEngagementAsync();
+                    await LoadPredictiveRecommendationsAsync();
                     StateHasChanged();
                 });
             }
         }
         catch (OperationCanceledException)
         {
-            // Normal component disposal.
+            // Expected when the component is disposed.
         }
         catch (ObjectDisposedException)
         {
-            // Timer disposed during navigation.
+            // The timer was disposed during navigation.
         }
     }
 
@@ -923,5 +1072,14 @@
         _refreshTimer?.Dispose();
         _refreshCancellation?.Dispose();
         _refreshLock.Dispose();
+    }
+
+    private sealed class TelemetryHistoryDto
+    {
+        public Guid SensorId { get; set; }
+        public double Value { get; set; }
+        public DateTimeOffset ObservedAt { get; set; }
+        public string MetricName { get; set; } = string.Empty;
+        public string Unit { get; set; } = string.Empty;
     }
 }

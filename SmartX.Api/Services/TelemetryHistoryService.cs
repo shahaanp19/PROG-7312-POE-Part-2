@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿
+using System.Collections.Concurrent;
 
 namespace SmartX.Api.Services;
 
@@ -27,13 +28,31 @@ public sealed class TelemetryHistoryService
     }
 
     public void AddReading(Guid sensorId, double value)
-    {
-        AddReading(sensorId, value, DateTimeOffset.UtcNow);
-    }
+        => AddReading(sensorId, value, DateTimeOffset.UtcNow);
 
     public void AddReading(
         Guid sensorId,
         double value,
+        DateTimeOffset observedAt)
+        => AddReading(sensorId, value, string.Empty, string.Empty, observedAt);
+
+    public void AddReading(
+        Guid sensorId,
+        double value,
+        string metricName,
+        string unit)
+        => AddReading(
+            sensorId,
+            value,
+            metricName,
+            unit,
+            DateTimeOffset.UtcNow);
+
+    public void AddReading(
+        Guid sensorId,
+        double value,
+        string metricName,
+        string unit,
         DateTimeOffset observedAt)
     {
         if (sensorId == Guid.Empty)
@@ -50,10 +69,15 @@ public sealed class TelemetryHistoryService
                 "Telemetry values must be finite numbers.");
         }
 
+        ArgumentNullException.ThrowIfNull(metricName);
+        ArgumentNullException.ThrowIfNull(unit);
+
         var reading = new TelemetryHistoryReading(
             sensorId,
             value,
-            observedAt.ToUniversalTime());
+            observedAt.ToUniversalTime(),
+            metricName.Trim(),
+            unit.Trim());
 
         _history.GetOrAdd(
             sensorId,
@@ -62,17 +86,13 @@ public sealed class TelemetryHistoryService
     }
 
     public IReadOnlyList<double> GetReadings(Guid sensorId)
-    {
-        return GetHistory(sensorId)
+        => GetTimestampedReadings(sensorId)
             .Select(reading => reading.Value)
             .ToArray();
-    }
 
     public IReadOnlyList<TelemetryHistoryReading> GetTimestampedReadings(
         Guid sensorId)
-    {
-        return GetHistory(sensorId);
-    }
+        => GetHistory(sensorId);
 
     public IReadOnlyList<TelemetryHistoryReading> GetTimestampedReadings(
         Guid sensorId,
@@ -85,17 +105,34 @@ public sealed class TelemetryHistoryService
                 "Count must be greater than zero.");
         }
 
-        var readings = GetHistory(sensorId);
-
-        return readings
+        return GetHistory(sensorId)
             .TakeLast(count)
             .ToArray();
     }
 
-    public double[,] GetMatrix(
-        Guid sensorId,
-        int rows,
-        int columns)
+    public IReadOnlyDictionary<Guid, int> GetHistorySummary()
+        => _history.ToDictionary(
+            entry => entry.Key,
+            entry => entry.Value.Count);
+
+    public IReadOnlyList<TelemetryHistoryReading> GetAllTimestampedReadings(
+        int countPerSensor = 100)
+    {
+        if (countPerSensor <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(countPerSensor),
+                "Count per sensor must be greater than zero.");
+        }
+
+        return _history
+            .SelectMany(entry =>
+                entry.Value.GetSnapshot().TakeLast(countPerSensor))
+            .OrderBy(reading => reading.ObservedAt)
+            .ToArray();
+    }
+
+    public double[,] GetMatrix(Guid sensorId, int rows, int columns)
     {
         if (rows <= 0)
         {
@@ -121,21 +158,17 @@ public sealed class TelemetryHistoryService
              index++)
         {
             var matrixIndex = index - startIndex;
-            var row = (int)(matrixIndex / columns);
-            var column = (int)(matrixIndex % columns);
-
-            matrix[row, column] = readings[(int)index];
+            matrix[(int)(matrixIndex / columns), (int)(matrixIndex % columns)]
+                = readings[(int)index];
         }
 
         return matrix;
     }
 
     public int GetReadingCount(Guid sensorId)
-    {
-        return _history.TryGetValue(sensorId, out var history)
+        => _history.TryGetValue(sensorId, out var history)
             ? history.Count
             : 0;
-    }
 
     public DateTimeOffset? GetLatestObservedAt(Guid sensorId)
     {
@@ -147,24 +180,12 @@ public sealed class TelemetryHistoryService
     }
 
     public bool RemoveHistory(Guid sensorId)
-    {
-        return _history.TryRemove(sensorId, out _);
-    }
+        => _history.TryRemove(sensorId, out _);
 
-    public IReadOnlyDictionary<Guid, int> GetHistorySummary()
-    {
-        return _history.ToDictionary(
-            entry => entry.Key,
-            entry => entry.Value.Count);
-    }
-
-    private IReadOnlyList<TelemetryHistoryReading> GetHistory(
-        Guid sensorId)
-    {
-        return _history.TryGetValue(sensorId, out var history)
+    private IReadOnlyList<TelemetryHistoryReading> GetHistory(Guid sensorId)
+        => _history.TryGetValue(sensorId, out var history)
             ? history.GetSnapshot()
             : Array.Empty<TelemetryHistoryReading>();
-    }
 
     private sealed class SensorHistory
     {
@@ -214,4 +235,6 @@ public sealed class TelemetryHistoryService
 public sealed record TelemetryHistoryReading(
     Guid SensorId,
     double Value,
-    DateTimeOffset ObservedAt);
+    DateTimeOffset ObservedAt,
+    string MetricName = "",
+    string Unit = "");
