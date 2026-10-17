@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿
+using Microsoft.AspNetCore.Mvc;
 using SmartX.Api.Services;
 using SmartX.Shared.DTOs;
 using SmartX.Shared.Models;
@@ -15,12 +16,28 @@ public class TelemetryController : ControllerBase
     private readonly TelemetryBatchProcessor _batchProcessor;
     private readonly TelemetryHistoryService? _historyService;
 
-    // Retains compatibility with existing unit tests.
+    // Maintains compatibility with existing unit tests.
     public TelemetryController(
         TelemetryIngestionService ingestionService,
         RecursiveDeploymentValidator deploymentValidator,
         SensorRegistryService sensorRegistry,
         TelemetryBatchProcessor batchProcessor)
+        : this(
+            ingestionService,
+            deploymentValidator,
+            sensorRegistry,
+            batchProcessor,
+            null)
+    {
+    }
+
+    // Constructor used by ASP.NET Core dependency injection.
+    public TelemetryController(
+        TelemetryIngestionService ingestionService,
+        RecursiveDeploymentValidator deploymentValidator,
+        SensorRegistryService sensorRegistry,
+        TelemetryBatchProcessor batchProcessor,
+        TelemetryHistoryService? historyService)
     {
         _ingestionService = ingestionService
             ?? throw new ArgumentNullException(nameof(ingestionService));
@@ -34,24 +51,7 @@ public class TelemetryController : ControllerBase
         _batchProcessor = batchProcessor
             ?? throw new ArgumentNullException(nameof(batchProcessor));
 
-        _historyService = null;
-    }
-
-    // Used by ASP.NET Core dependency injection in the running API.
-    public TelemetryController(
-        TelemetryIngestionService ingestionService,
-        RecursiveDeploymentValidator deploymentValidator,
-        SensorRegistryService sensorRegistry,
-        TelemetryBatchProcessor batchProcessor,
-        TelemetryHistoryService historyService)
-        : this(
-            ingestionService,
-            deploymentValidator,
-            sensorRegistry,
-            batchProcessor)
-    {
-        _historyService = historyService
-            ?? throw new ArgumentNullException(nameof(historyService));
+        _historyService = historyService;
     }
 
     [HttpGet("health")]
@@ -61,7 +61,7 @@ public class TelemetryController : ControllerBase
         {
             status = "Healthy",
             service = "Telemetry API",
-            timestampUtc = DateTime.UtcNow
+            timestampUtc = DateTimeOffset.UtcNow
         });
     }
 
@@ -130,7 +130,8 @@ public class TelemetryController : ControllerBase
         {
             return BadRequest(new
             {
-                message = "Telemetry limits and thresholds must be finite numbers."
+                message =
+                    "Telemetry limits and thresholds must be finite numbers."
             });
         }
 
@@ -171,11 +172,11 @@ public class TelemetryController : ControllerBase
             return UnprocessableEntity(result);
         }
 
-        // Record accepted telemetry when history storage is available.
-        // Existing unit tests using the four-parameter constructor remain valid.
+        // Store accepted readings for subsequent predictive analysis.
         _historyService?.AddReading(
             request.SensorDeviceId,
-            request.Value);
+            request.Value,
+            DateTimeOffset.UtcNow);
 
         return Ok(result);
     }
@@ -209,32 +210,26 @@ public class TelemetryController : ControllerBase
         var readingOne = new MeterReading(sensorId, 120.5, "W");
         var readingTwo = new MeterReading(sensorId, 80.25, "W");
 
-        var aggregate = readingOne + readingTwo;
-        var delta = readingOne - readingTwo;
-
         return Ok(new
         {
             demonstration = "Generics and operator overloading",
-
             genericPackets = new
             {
                 temperature,
                 power,
                 relay
             },
-
             operatorOverloading = new
             {
                 addition = new
                 {
                     operation = "readingOne + readingTwo",
-                    result = aggregate
+                    result = readingOne + readingTwo
                 },
-
                 subtraction = new
                 {
                     operation = "readingOne - readingTwo",
-                    result = delta
+                    result = readingOne - readingTwo
                 }
             }
         });
@@ -478,7 +473,6 @@ public class TelemetryController : ControllerBase
 
         var matrixRows = matrix.GetLength(0);
         var matrixColumns = matrix.GetLength(1);
-
         var matrixData = new List<float[]>(matrixRows);
 
         for (var row = 0; row < matrixRows; row++)
@@ -495,6 +489,7 @@ public class TelemetryController : ControllerBase
 
         var batchSizes = new int[historicalBatches.Length];
         var totalReadings = 0;
+        var largestBatchSize = 0;
 
         for (var index = 0; index < historicalBatches.Length; index++)
         {
@@ -502,15 +497,10 @@ public class TelemetryController : ControllerBase
 
             batchSizes[index] = size;
             totalReadings += size;
-        }
 
-        var largestBatchSize = 0;
-
-        for (var index = 0; index < batchSizes.Length; index++)
-        {
-            if (batchSizes[index] > largestBatchSize)
+            if (size > largestBatchSize)
             {
-                largestBatchSize = batchSizes[index];
+                largestBatchSize = size;
             }
         }
 
@@ -518,7 +508,6 @@ public class TelemetryController : ControllerBase
         {
             demonstration =
                 "Jagged arrays, multidimensional arrays, contiguous buffers and generic collections",
-
             sourceData = new
             {
                 batchCount = historicalBatches.Length,
@@ -526,45 +515,35 @@ public class TelemetryController : ControllerBase
                 totalReadings,
                 largestBatchSize
             },
-
             memoryLayout = new
             {
                 jaggedRepresentation =
                     "Variable-length arrays with no padding between batches",
-
                 rectangularRepresentation =
                     "Row-major multidimensional array for matrix-oriented processing",
-
                 contiguousRepresentation =
                     "One-dimensional float buffer for sequential processing",
-
                 flattenedElementCount = flattened.Length
             },
-
             collectionProcessing = new
             {
                 readingsTransferredToList = packets.Count,
                 collectionType =
                     "List<SmartX.Shared.Generics.TelemetryPacket<float>>"
             },
-
             packets,
             flattened,
-
             matrix = new
             {
                 rows = matrixRows,
                 columns = matrixColumns,
                 data = matrixData
             },
-
             validation = new
             {
                 packetCountMatchesSource = packets.Count == totalReadings,
-
                 flattenedCountMatchesSource =
                     flattened.Length == totalReadings,
-
                 matrixDimensionsValid =
                     matrixRows == historicalBatches.Length &&
                     matrixColumns == largestBatchSize
