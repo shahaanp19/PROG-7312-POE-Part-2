@@ -1,4 +1,6 @@
-﻿using SmartX.Shared.Models;
+﻿
+using System;
+using SmartX.Shared.Models;
 
 namespace SmartX.Shared.Validators;
 
@@ -24,7 +26,8 @@ public class TelemetryThresholdValidator
     {
         ArgumentNullException.ThrowIfNull(metric);
 
-        return value >= metric.MinimumExpectedValue &&
+        return double.IsFinite(value) &&
+               value >= metric.MinimumExpectedValue &&
                value <= metric.MaximumExpectedValue;
     }
 
@@ -34,7 +37,8 @@ public class TelemetryThresholdValidator
     {
         ArgumentNullException.ThrowIfNull(metric);
 
-        return value >= metric.WarningThreshold;
+        return double.IsFinite(value) &&
+               value >= metric.WarningThreshold;
     }
 
     public bool IsCritical(
@@ -43,7 +47,8 @@ public class TelemetryThresholdValidator
     {
         ArgumentNullException.ThrowIfNull(metric);
 
-        return value >= metric.CriticalThreshold;
+        return double.IsFinite(value) &&
+               value >= metric.CriticalThreshold;
     }
 
     public bool IsAnomaly(
@@ -52,7 +57,8 @@ public class TelemetryThresholdValidator
     {
         ArgumentNullException.ThrowIfNull(metric);
 
-        return !IsWithinExpectedRange(metric, value);
+        return !double.IsFinite(value) ||
+               !IsWithinExpectedRange(metric, value);
     }
 }
 

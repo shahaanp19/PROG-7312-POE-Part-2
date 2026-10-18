@@ -1,4 +1,6 @@
 ﻿
+using System;
+using System.Collections.Generic;
 using Microsoft.AspNetCore.Mvc;
 using SmartX.Api.Services;
 using SmartX.Shared.DTOs;
@@ -72,7 +74,9 @@ public class TelemetryController : ControllerBase
         }
 
         if (!ModelState.IsValid)
+        {
             return ValidationProblem(ModelState);
+        }
 
         if (request.SensorDeviceId == Guid.Empty)
         {
@@ -91,39 +95,26 @@ public class TelemetryController : ControllerBase
             });
         }
 
-        if (string.IsNullOrWhiteSpace(request.MetricName))
+        string metricName = request.MetricName?.Trim() ?? string.Empty;
+        string unit = request.Unit?.Trim() ?? string.Empty;
+
+        if (metricName.Length == 0 || unit.Length == 0)
         {
             return BadRequest(new
             {
-                message = "Telemetry metric name is required."
+                message = "Telemetry metric name and unit are required."
             });
         }
 
-        if (string.IsNullOrWhiteSpace(request.Unit))
-        {
-            return BadRequest(new
-            {
-                message = "Telemetry unit is required."
-            });
-        }
-
-        if (!double.IsFinite(request.Value))
-        {
-            return BadRequest(new
-            {
-                message = "Telemetry value must be a finite number."
-            });
-        }
-
-        if (!double.IsFinite(request.MinimumExpectedValue) ||
+        if (!double.IsFinite(request.Value) ||
+            !double.IsFinite(request.MinimumExpectedValue) ||
             !double.IsFinite(request.MaximumExpectedValue) ||
             !double.IsFinite(request.WarningThreshold) ||
             !double.IsFinite(request.CriticalThreshold))
         {
             return BadRequest(new
             {
-                message =
-                    "Telemetry limits and thresholds must be finite numbers."
+                message = "Telemetry values, limits, and thresholds must be finite numbers."
             });
         }
 
@@ -131,8 +122,7 @@ public class TelemetryController : ControllerBase
         {
             return BadRequest(new
             {
-                message =
-                    "Minimum expected value cannot exceed maximum expected value."
+                message = "Minimum expected value cannot exceed maximum expected value."
             });
         }
 
@@ -140,19 +130,7 @@ public class TelemetryController : ControllerBase
         {
             return BadRequest(new
             {
-                message =
-                    "Warning threshold cannot exceed critical threshold."
-            });
-        }
-
-        var metricName = request.MetricName.Trim();
-        var unit = request.Unit.Trim();
-
-        if (metricName.Length == 0 || unit.Length == 0)
-        {
-            return BadRequest(new
-            {
-                message = "Telemetry metric name and unit are required."
+                message = "Warning threshold cannot exceed critical threshold."
             });
         }
 
@@ -180,10 +158,13 @@ public class TelemetryController : ControllerBase
             });
         }
 
-        var observedAt = DateTimeOffset.UtcNow;
+        var result = _ingestionService.Process(metric, request.Value);
 
-        // Preserve the configured thresholds alongside each reading
-        // so the predictive engine can evaluate sensor-specific limits.
+        if (!result.Success)
+        {
+            return UnprocessableEntity(result);
+        }
+
         _historyService?.AddReading(
             request.SensorDeviceId,
             request.Value,
@@ -191,12 +172,7 @@ public class TelemetryController : ControllerBase
             unit,
             request.WarningThreshold,
             request.CriticalThreshold,
-            observedAt);
-
-        var result = _ingestionService.Process(metric, request.Value);
-
-        if (!result.Success)
-            return UnprocessableEntity(result);
+            DateTimeOffset.UtcNow);
 
         return Ok(result);
     }
@@ -341,6 +317,7 @@ public class TelemetryController : ControllerBase
         };
 
         const string targetNode = "Temperature Sensor";
+
         var isValid = _deploymentValidator.ValidateNode(
             facility, targetNode, out var path);
 
@@ -395,6 +372,7 @@ public class TelemetryController : ControllerBase
         };
 
         const string targetNode = "Hidden Sensor";
+
         var isValid = _deploymentValidator.ValidateNode(
             facility, targetNode, out var path);
 
@@ -438,6 +416,7 @@ public class TelemetryController : ControllerBase
         };
 
         const string targetNode = "Nonexistent Sensor";
+
         var isValid = _deploymentValidator.ValidateNode(
             facility, targetNode, out var path);
 
@@ -466,8 +445,10 @@ public class TelemetryController : ControllerBase
 
         var packets = _batchProcessor.ProcessHistoricalBatches(
             historicalBatches);
+
         var matrix = _batchProcessor.CreateTelemetryMatrix(
             historicalBatches);
+
         var flattened = _batchProcessor.FlattenTelemetryBatches(
             historicalBatches);
 
@@ -480,7 +461,9 @@ public class TelemetryController : ControllerBase
             var rowData = new float[matrixColumns];
 
             for (var column = 0; column < matrixColumns; column++)
+            {
                 rowData[column] = matrix[row, column];
+            }
 
             matrixData.Add(rowData);
         }
@@ -492,6 +475,7 @@ public class TelemetryController : ControllerBase
         for (var index = 0; index < historicalBatches.Length; index++)
         {
             var size = historicalBatches[index]?.Length ?? 0;
+
             batchSizes[index] = size;
             totalReadings += size;
             largestBatchSize = Math.Max(largestBatchSize, size);
