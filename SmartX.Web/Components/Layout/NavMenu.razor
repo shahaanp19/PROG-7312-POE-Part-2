@@ -1,67 +1,40 @@
 ﻿@using Microsoft.AspNetCore.Components
 @using Microsoft.AspNetCore.Components.Routing
-@implements IDisposable
 @inject NavigationManager Navigation
 
 <nav class="pillar-nav" aria-label="Main navigation">
-    <div class="nav-brand">
+    <div class="nav-links">
         <NavLink href="/"
                  Match="NavLinkMatch.All"
-                 class="brand-link"
-                 aria-label="Smart-X dashboard">
-            <span class="brand-mark" aria-hidden="true">S</span>
+                 class="nav-link"
+                 aria-label="Overview dashboard">
+            <span class="nav-icon" aria-hidden="true">⌂</span>
+            <span class="nav-link-label">Overview</span>
+        </NavLink>
 
-            <span class="brand-copy">
-                <strong>SMART-X</strong>
-                <small>IoT Gateway Ecosystem</small>
-            </span>
+        <NavLink href="/commands"
+                 Match="NavLinkMatch.All"
+                 class="nav-link">
+            <span class="nav-icon" aria-hidden="true">↗</span>
+            <span class="nav-link-label">Command Stream</span>
+        </NavLink>
+
+        <NavLink href="/command-history"
+                 Match="NavLinkMatch.All"
+                 class="nav-link">
+            <span class="nav-icon" aria-hidden="true">◷</span>
+            <span class="nav-link-label">Command History</span>
+        </NavLink>
+
+        <NavLink href="/collection-diagnostics"
+                 Match="NavLinkMatch.All"
+                 class="nav-link">
+            <span class="nav-icon" aria-hidden="true">⊞</span>
+            <span class="nav-link-label">Collection Diagnostics</span>
         </NavLink>
     </div>
 
-    <div class="nav-section">
-        <h2 class="nav-section-title">MAIN MENU</h2>
-
-        <div class="pillar-links">
-            <NavLink href="/"
-                     Match="NavLinkMatch.All"
-                     class="nav-link">
-                <span class="nav-icon" aria-hidden="true">⌂</span>
-                <span class="nav-link-label">Overview</span>
-            </NavLink>
-        </div>
-    </div>
-
-    <section class="@CommandPillarClass"
-             aria-label="Command Management">
-        <h2 class="nav-section-title">COMMAND MANAGEMENT</h2>
-
-        <div class="pillar-links">
-            <NavLink href="/commands"
-                     Match="NavLinkMatch.All"
-                     class="nav-link">
-                <span class="nav-icon" aria-hidden="true">↗</span>
-                <span class="nav-link-label">Command Stream</span>
-            </NavLink>
-
-            <NavLink href="/command-history"
-                     Match="NavLinkMatch.All"
-                     class="nav-link">
-                <span class="nav-icon" aria-hidden="true">◷</span>
-                <span class="nav-link-label">Command History</span>
-            </NavLink>
-
-            <NavLink href="/collection-diagnostics"
-                     Match="NavLinkMatch.All"
-                     class="nav-link">
-                <span class="nav-icon" aria-hidden="true">⊞</span>
-                <span class="nav-link-label">Collection Diagnostics</span>
-            </NavLink>
-        </div>
-    </section>
-
-    <div class="nav-spacer"></div>
-
-    <div class="nav-footer">
+    <div class="nav-footer" role="status" aria-label="Application status: Online">
         <span class="connection-dot" aria-hidden="true"></span>
 
         <span class="nav-footer-copy">
@@ -71,43 +44,186 @@
     </div>
 </nav>
 
-@code {
-    private bool IsCommandPillarActive =>
-        GetCurrentPath() is
-            "commands" or
-            "command-history" or
-            "collection-diagnostics";
-
-    private string CommandPillarClass =>
-        IsCommandPillarActive
-            ? "nav-pillar pillar-active"
-            : "nav-pillar";
-
-    protected override void OnInitialized()
-    {
-        Navigation.LocationChanged += HandleLocationChanged;
+<style>
+    .pillar-nav {
+        min-height: 76px;
+        padding: 16px 32px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
     }
 
-    private string GetCurrentPath()
-    {
-        var relativePath = Navigation.ToBaseRelativePath(
-            Navigation.Uri);
+        .pillar-nav .nav-links {
+            min-width: 0;
+            flex: 1 1 auto;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
 
-        return relativePath
-            .Split('?', '#')[0]
-            .Trim('/')
-            .ToLowerInvariant();
+        .pillar-nav .nav-link {
+            min-height: 44px;
+            padding: 0 16px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            flex: 0 0 auto;
+            border: 1px solid var(--sx-border);
+            border-radius: 8px;
+            color: var(--sx-text-soft);
+            background: var(--sx-surface);
+            font-size: 13px;
+            font-weight: 650;
+            line-height: 1.3;
+            white-space: nowrap;
+            text-decoration: none;
+            transition: color .15s ease, background-color .15s ease, border-color .15s ease, box-shadow .15s ease;
+        }
+
+            .pillar-nav .nav-link:hover {
+                color: var(--sx-primary-dark);
+                background: var(--sx-surface-hover);
+                border-color: #b9cdf5;
+            }
+
+            .pillar-nav .nav-link.active {
+                color: var(--sx-primary-dark);
+                background: var(--sx-primary-soft);
+                border-color: #a9c4ff;
+                box-shadow: inset 0 -2px 0 var(--sx-primary);
+                font-weight: 750;
+            }
+
+            .pillar-nav .nav-link:focus-visible {
+                outline: none;
+                box-shadow: var(--sx-focus);
+            }
+
+        .pillar-nav .nav-icon {
+            width: 20px;
+            height: 20px;
+            flex: 0 0 20px;
+            display: inline-grid;
+            place-items: center;
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        .pillar-nav .nav-link-label {
+            display: inline-block;
+            line-height: 1.3;
+        }
+
+        .pillar-nav .nav-footer {
+            min-height: 44px;
+            margin: 0 0 0 auto;
+            padding: 0 14px;
+            display: inline-flex;
+            flex: 0 0 auto;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            border: 1px solid #cfe8d9;
+            border-radius: 8px;
+            background: #f1faf5;
+            white-space: nowrap;
+        }
+
+        .pillar-nav .nav-footer-copy {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 2px;
+            line-height: 1.25;
+        }
+
+        .pillar-nav .nav-footer strong {
+            color: var(--sx-text);
+            font-size: 11px;
+            font-weight: 750;
+        }
+
+        .pillar-nav .nav-footer small {
+            color: var(--sx-success);
+            font-size: 11px;
+            font-weight: 650;
+        }
+
+        .pillar-nav .connection-dot {
+            width: 8px;
+            height: 8px;
+            flex: 0 0 8px;
+            border-radius: 50%;
+            background: var(--sx-success);
+            box-shadow: 0 0 0 3px rgb(22 132 90 / 12%);
+        }
+
+    @@media (max-width: 1100px) {
+        .pillar-nav {
+            padding-right: 20px;
+            padding-left: 20px;
+            gap: 16px;
+        }
+
+            .pillar-nav .nav-links {
+                gap: 8px;
+            }
+
+            .pillar-nav .nav-link {
+                padding-right: 12px;
+                padding-left: 12px;
+            }
     }
 
-    private void HandleLocationChanged(
-        object? sender,
-        LocationChangedEventArgs args)
-    {
-        _ = InvokeAsync(StateHasChanged);
+    @@media (max-width: 760px) {
+        .pillar-nav {
+            align-items: stretch;
+            flex-direction: column;
+            gap: 12px;
+            padding: 16px 20px;
+        }
+
+            .pillar-nav .nav-links {
+                width: 100%;
+                flex: 0 0 auto;
+                align-items: stretch;
+                flex-direction: column;
+                flex-wrap: nowrap;
+                gap: 8px;
+            }
+
+            .pillar-nav .nav-link {
+                width: 100%;
+                min-height: 44px;
+                justify-content: flex-start;
+                padding: 0 14px;
+            }
+
+            .pillar-nav .nav-footer {
+                width: 100%;
+                min-height: 44px;
+                margin: 0;
+                justify-content: flex-start;
+            }
     }
 
-    public void Dispose()
-    {
-        Navigation.LocationChanged -= HandleLocationChanged;
+    @@media (max-width: 480px) {
+        .pillar-nav {
+            padding: 14px;
+        }
+
+            .pillar-nav .nav-link {
+                font-size: 13px;
+            }
     }
-}
+
+    @@media (prefers-reduced-motion: reduce) {
+        .pillar-nav .nav-link {
+            transition: none;
+        }
+    }
+</style>
