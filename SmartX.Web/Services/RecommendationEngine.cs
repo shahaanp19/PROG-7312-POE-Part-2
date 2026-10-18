@@ -1,25 +1,22 @@
-﻿
-using System;
-using System.Collections;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Reflection;
 
 namespace SmartX.Web.Services;
 
 public sealed class RecommendationEngine
 {
-    private readonly CommandStateService _commandState;
-
     private const int MaximumRecommendations = 20;
     private const int MinimumTrendReadings = 3;
+    private const int MinimumForecastMinutes = 2;
 
-    private static readonly TimeSpan StaleReadingAge =
-        TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan StaleReadingAge = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan ForecastHorizon = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan RecentCommandWindow = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan DelayedCommandAge = TimeSpan.FromMinutes(5);
 
-    private static readonly TimeSpan ForecastHorizon =
-        TimeSpan.FromMinutes(30);
+    private readonly CommandStateService _commandState;
 
     public RecommendationEngine(CommandStateService commandState)
     {
@@ -37,28 +34,29 @@ public sealed class RecommendationEngine
             .Where(x => x is not null)
             .Where(x => double.IsFinite(x.Value))
             .Where(x => x.ObservedAt != default)
+            .Where(x => !string.IsNullOrWhiteSpace(x.Metric))
             .OrderBy(x => x.ObservedAt)
             .ToList();
 
         AddTelemetryRecommendations(readings, recommendations);
         AddCommandRecommendations(recommendations);
         AddOperationalRecommendations(recommendations);
+        AddCrossSignalRecommendations(readings, recommendations);
 
         var query = searchQuery?.Trim();
 
+        IEnumerable<SmartXRecommendation> result = recommendations;
+
         if (!string.IsNullOrWhiteSpace(query))
         {
-            recommendations = recommendations
-                .Where(x =>
-                    Contains(x.Title, query) ||
-                    Contains(x.Description, query) ||
-                    x.DeviceId?.ToString().Contains(
-                        query,
-                        StringComparison.OrdinalIgnoreCase) == true)
-                .ToList();
+            result = result.Where(x =>
+                Contains(x.Title, query) ||
+                Contains(x.Description, query) ||
+                x.DeviceId?.ToString().Contains(
+                    query, StringComparison.OrdinalIgnoreCase) == true);
         }
 
-        return recommendations
+        return result
             .GroupBy(
                 x => $"{x.Title}|{x.Description}|{x.DeviceId}",
                 StringComparer.OrdinalIgnoreCase)
@@ -66,7 +64,7 @@ public sealed class RecommendationEngine
             .OrderBy(x => x.Severity)
             .ThenBy(x => x.Title, StringComparer.OrdinalIgnoreCase)
             .Take(MaximumRecommendations)
-            .ToList();
+            .ToArray();
     }
 
     private static void AddTelemetryRecommendations(
@@ -75,42 +73,31 @@ public sealed class RecommendationEngine
     {
         var now = DateTimeOffset.UtcNow;
 
-        var groups = readings
-            .GroupBy(x => new
-            {
-                x.DeviceId,
-                Metric = (x.Metric ?? string.Empty).Trim()
-            });
-
-        foreach (var group in groups)
+        foreach (var group in readings.GroupBy(x => new
         {
-            var history = group
-                .OrderBy(x => x.ObservedAt)
-                .ToList();
-
-            if (history.Count == 0)
-                continue;
-
-            // Only the latest observation determines current status.
-            // Older observations remain available for trend analysis.
+            x.DeviceId,
+            Metric = x.Metric.Trim()
+        }))
+        {
+            var history = group.OrderBy(x => x.ObservedAt).ToArray();
             var latest = history[^1];
+
+            var age = now - latest.ObservedAt.ToUniversalTime();
             var metric = DisplayMetric(latest.Metric);
             var value = FormatValue(latest.Value, latest.Unit);
-            var age = now - latest.ObservedAt.ToUniversalTime();
 
             if (age > StaleReadingAge)
             {
                 Add(
                     recommendations,
                     $"Stale {metric} telemetry",
-                    $"The latest available {metric} reading is " +
-                    $"{FormatAge(age)} old. Check device connectivity, " +
-                    "sensor power, and telemetry ingestion.",
+                    $"The latest {metric} reading is {FormatAge(age)} old. " +
+                    "Check device connectivity, sensor power, and telemetry ingestion.",
                     RecommendationSeverity.Warning,
                     latest.DeviceId);
             }
 
-            if (IsPositiveFinite(latest.CriticalThreshold) &&
+            if (IsValidThreshold(latest.CriticalThreshold) &&
                 latest.Value >= latest.CriticalThreshold)
             {
                 Add(
@@ -122,7 +109,7 @@ public sealed class RecommendationEngine
                     RecommendationSeverity.Critical,
                     latest.DeviceId);
             }
-            else if (IsPositiveFinite(latest.WarningThreshold) &&
+            else if (IsValidThreshold(latest.WarningThreshold) &&
                      latest.Value >= latest.WarningThreshold)
             {
                 Add(
@@ -130,7 +117,7 @@ public sealed class RecommendationEngine
                     $"High {metric} reading",
                     $"{metric} is {value}, at or above the warning threshold " +
                     $"of {FormatValue(latest.WarningThreshold, latest.Unit)}. " +
-                    "Monitor the device and investigate the cause.",
+                    "Investigate the cause and monitor the next readings.",
                     RecommendationSeverity.Warning,
                     latest.DeviceId);
             }
@@ -147,282 +134,243 @@ public sealed class RecommendationEngine
         if (history.Count < MinimumTrendReadings)
             return;
 
-        var first = history[0];
+        var cutoff = latest.ObservedAt - TimeSpan.FromHours(2);
+        var recent = history.Where(x => x.ObservedAt >= cutoff).ToArray();
 
-        if (latest.ObservedAt <= first.ObservedAt)
+        if (recent.Length < MinimumTrendReadings)
             return;
 
         var elapsedMinutes =
-            (latest.ObservedAt - first.ObservedAt).TotalMinutes;
+            (recent[^1].ObservedAt - recent[0].ObservedAt).TotalMinutes;
 
-        if (elapsedMinutes <= 0)
+        if (elapsedMinutes < MinimumForecastMinutes)
             return;
 
-        var change = latest.Value - first.Value;
-        var scale = Math.Max(Math.Abs(first.Value), 1.0);
+        var slope = CalculateRegressionSlope(recent);
+
+        if (!double.IsFinite(slope))
+            return;
+
+        var residuals = recent.Select(x =>
+            x.Value - (recent[0].Value +
+                       slope * (x.ObservedAt - recent[0].ObservedAt).TotalMinutes))
+            .ToArray();
+
+        var mean = residuals.Average();
+        var noise = Math.Sqrt(residuals.Average(x => Math.Pow(x - mean, 2)));
+
+        var change = latest.Value - recent[0].Value;
+        var scale = Math.Max(Math.Abs(recent[0].Value), 1.0);
         var relativeChange = Math.Abs(change) / scale;
-        var range = history.Max(x => x.Value) - history.Min(x => x.Value);
 
-        // Ignore insignificant changes and nearly flat histories.
-        if (range <= scale * 0.01 || relativeChange < 0.05)
+        if (relativeChange < 0.05)
             return;
 
-        var slopePerMinute = CalculateRegressionSlope(history);
-
-        if (!double.IsFinite(slopePerMinute))
+        // Avoid presenting an unstable forecast as a confident prediction.
+        var trendMagnitude = Math.Abs(slope) * ForecastHorizon.TotalMinutes;
+        if (noise > Math.Max(scale * 0.5, trendMagnitude * 2))
             return;
 
-        var forecast = latest.Value +
-                       slopePerMinute * ForecastHorizon.TotalMinutes;
+        var forecast = latest.Value + slope * ForecastHorizon.TotalMinutes;
 
         if (!double.IsFinite(forecast))
             return;
 
-        var isRising = slopePerMinute > 0;
+        var rising = slope > 0;
         var metric = DisplayMetric(latest.Metric);
         var unit = latest.Unit;
 
-        if (isRising &&
-            IsPositiveFinite(latest.CriticalThreshold) &&
+        if (rising &&
+            IsValidThreshold(latest.CriticalThreshold) &&
             latest.Value < latest.CriticalThreshold &&
             forecast >= latest.CriticalThreshold)
         {
             Add(
                 recommendations,
                 $"Predicted critical {metric}",
-                $"{metric} is trending upward. A linear regression over " +
-                $"recent readings projects approximately " +
-                $"{FormatValue(forecast, unit)} in " +
-                $"{ForecastHorizon.TotalMinutes:0} minutes, crossing the " +
-                $"critical threshold of " +
-                $"{FormatValue(latest.CriticalThreshold, unit)}. " +
-                "Verify the trend with fresh readings and inspect the device.",
+                $"{metric} is rising. Recent linear regression projects " +
+                $"{FormatValue(forecast, unit)} in 30 minutes, crossing the " +
+                $"critical threshold of {FormatValue(latest.CriticalThreshold, unit)}. " +
+                "Verify with fresh readings and inspect the device now.",
                 RecommendationSeverity.Critical,
                 latest.DeviceId);
         }
-        else if (isRising &&
-                 IsPositiveFinite(latest.WarningThreshold) &&
+        else if (rising &&
+                 IsValidThreshold(latest.WarningThreshold) &&
                  latest.Value < latest.WarningThreshold &&
                  forecast >= latest.WarningThreshold)
         {
             Add(
                 recommendations,
                 $"Predicted high {metric}",
-                $"{metric} is trending upward and may cross the warning " +
-                $"threshold of {FormatValue(latest.WarningThreshold, unit)} " +
-                $"within {ForecastHorizon.TotalMinutes:0} minutes. " +
-                "Monitor upcoming readings and investigate the cause.",
+                $"{metric} is rising and may cross the warning threshold " +
+                $"{FormatValue(latest.WarningThreshold, unit)} within 30 minutes. " +
+                "Check load, environmental conditions, and upcoming readings.",
                 RecommendationSeverity.Warning,
                 latest.DeviceId);
         }
-        else if (isRising && relativeChange >= 0.25)
+        else if (relativeChange >= 0.25)
         {
             Add(
                 recommendations,
-                $"Rapidly increasing {metric}",
-                $"{metric} changed by {FormatValue(change, unit)} over " +
-                $"{elapsedMinutes:0.#} minutes. Check whether the increase " +
-                "is expected and continue monitoring.",
-                RecommendationSeverity.Warning,
-                latest.DeviceId);
-        }
-        else if (!isRising && relativeChange >= 0.25)
-        {
-            Add(
-                recommendations,
-                $"Rapidly decreasing {metric}",
-                $"{metric} decreased by " +
-                $"{FormatValue(Math.Abs(change), unit)} over " +
-                $"{elapsedMinutes:0.#} minutes. Verify that the decline " +
-                "is expected and that the sensor is reporting correctly.",
-                RecommendationSeverity.Info,
+                rising ? $"Rapidly increasing {metric}" : $"Rapidly decreasing {metric}",
+                $"{metric} changed by {FormatValue(Math.Abs(change), unit)} " +
+                $"over {elapsedMinutes:0.#} minutes. Confirm whether the change " +
+                "is expected and inspect the sensor if it is not.",
+                rising ? RecommendationSeverity.Warning : RecommendationSeverity.Info,
                 latest.DeviceId);
         }
     }
 
-    // Least-squares regression using minutes relative to the first reading.
-    // Relative time avoids unnecessarily large timestamp values.
     private static double CalculateRegressionSlope(
         IReadOnlyList<TelemetryObservation> history)
     {
         var origin = history[0].ObservedAt;
-        var points = history
-            .Select(x => new
-            {
-                X = (x.ObservedAt - origin).TotalMinutes,
-                Y = x.Value
-            })
-            .ToList();
+        var points = history.Select(x => new
+        {
+            X = (x.ObservedAt - origin).TotalMinutes,
+            Y = x.Value
+        }).ToArray();
 
-        var meanX = points.Average(p => p.X);
-        var meanY = points.Average(p => p.Y);
-
-        var numerator = points.Sum(
-            p => (p.X - meanX) * (p.Y - meanY));
-
-        var denominator = points.Sum(
-            p => (p.X - meanX) * (p.X - meanX));
+        var meanX = points.Average(x => x.X);
+        var meanY = points.Average(x => x.Y);
+        var denominator = points.Sum(x => Math.Pow(x.X - meanX, 2));
 
         if (denominator <= 0 || !double.IsFinite(denominator))
             return double.NaN;
 
-        return numerator / denominator;
+        return points.Sum(x => (x.X - meanX) * (x.Y - meanY)) / denominator;
     }
 
     private void AddCommandRecommendations(
         ICollection<SmartXRecommendation> recommendations)
     {
-        var queue = GetMemberValue(_commandState, "Queue");
+        var now = DateTimeOffset.UtcNow;
+        var snapshot = _commandState.GetOperationalSnapshot(RecentCommandWindow);
 
-        foreach (var command in Enumerate(queue))
+        if (snapshot.OldestPendingCommandAge >= DelayedCommandAge)
         {
-            var status =
-                GetMemberValue(command, "Status")?.ToString() ?? string.Empty;
-
-            if (!IsFailedStatus(status))
-                continue;
-
             Add(
                 recommendations,
-                "Command execution issue",
-                $"A command appears to have failed or been rejected. " +
-                $"Command: {ReadCommandName(command)}. Review its result " +
-                "and device connectivity before retrying.",
-                RecommendationSeverity.Warning,
-                ReadGuid(command, "DeviceId"));
+                "Commands delayed in queue",
+                $"The oldest pending command is {FormatAge(snapshot.OldestPendingCommandAge)} old. " +
+                "Check device availability, queue processing, and whether retries are accumulating.",
+                snapshot.CriticalPendingCommands > 0
+                    ? RecommendationSeverity.Critical
+                    : RecommendationSeverity.Warning,
+                null);
         }
 
-        var history = GetMemberValue(_commandState, "History");
-
-        foreach (var command in Enumerate(history))
+        foreach (var command in _commandState.History)
         {
-            var status =
-                GetMemberValue(command, "Status")?.ToString() ?? string.Empty;
-
-            if (!IsFailedStatus(status))
+            if (!string.Equals(command.Status, "Failed", StringComparison.OrdinalIgnoreCase))
                 continue;
 
             Add(
                 recommendations,
                 "Review failed command",
-                $"Command history contains a failed or rejected command: " +
-                $"{ReadCommandName(command)}. Review the command status and " +
-                "device response before attempting it again.",
+                $"Command '{command.Command}' for device '{command.DeviceId}' failed: " +
+                $"{command.Details} Review the device response before retrying.",
                 RecommendationSeverity.Warning,
-                ReadGuid(command, "DeviceId"));
+                Guid.TryParse(command.DeviceId, out var id) ? id : null);
+        }
+
+        foreach (var command in _commandState.Queue)
+        {
+            if (command.Priority == "Critical")
+            {
+                Add(
+                    recommendations,
+                    "Critical command awaiting execution",
+                    $"Critical command '{command.Command}' for device '{command.DeviceId}' " +
+                    "is still pending. Verify connectivity and command processing.",
+                    RecommendationSeverity.Critical,
+                    Guid.TryParse(command.DeviceId, out var id) ? id : null);
+            }
         }
     }
 
     private void AddOperationalRecommendations(
         ICollection<SmartXRecommendation> recommendations)
     {
-        var activeErrors = GetMemberValue(_commandState, "ActiveErrors");
+        var snapshot = _commandState.GetOperationalSnapshot(RecentCommandWindow);
 
-        foreach (var error in Enumerate(activeErrors))
+        if (snapshot.ActiveErrorCount > 0)
         {
-            var message = error?.ToString()?.Trim();
-
-            if (string.IsNullOrWhiteSpace(message))
-                continue;
-
-            Add(
-                recommendations,
-                "Active system error",
-                $"An active operational error needs attention: {message}. " +
-                "Investigate the cause and confirm that the error clears.",
-                RecommendationSeverity.Warning,
-                null);
-        }
-
-        // The existing service's snapshot method has an optional parameter.
-        // Reflection must account for that parameter even when it is omitted
-        // by callers.
-        var snapshotMethod = _commandState.GetType()
-            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
-            .FirstOrDefault(method =>
+            foreach (var error in snapshot.ActiveErrors.Take(5))
             {
-                if (!string.Equals(
-                    method.Name,
-                    "GetOperationalSnapshot",
-                    StringComparison.Ordinal))
-                    return false;
-
-                var parameters = method.GetParameters();
-
-                return parameters.Length == 0 ||
-                       (parameters.Length == 1 &&
-                        parameters[0].IsOptional);
-            });
-
-        if (snapshotMethod is null)
-            return;
-
-        object? snapshot;
-
-        try
-        {
-            var parameters = snapshotMethod.GetParameters();
-            snapshot = parameters.Length == 0
-                ? snapshotMethod.Invoke(_commandState, null)
-                : snapshotMethod.Invoke(_commandState, new object?[] { null });
-        }
-        catch
-        {
-            return;
+                Add(
+                    recommendations,
+                    "Active system error",
+                    $"An active operational error requires attention: {error}. " +
+                    "Investigate its cause and resolve it when service is restored.",
+                    RecommendationSeverity.Warning,
+                    null);
+            }
         }
 
-        if (snapshot is null)
-            return;
-
-        var criticalPending =
-            ReadNumber(snapshot, "CriticalPendingCommands");
-
-        var highPending =
-            ReadNumber(snapshot, "HighPendingCommands");
-
-        var pending = ReadNumber(snapshot, "PendingCommands");
-
-        if (criticalPending > 0)
-        {
-            Add(
-                recommendations,
-                "Critical commands awaiting execution",
-                $"{criticalPending} critical command(s) are pending. " +
-                "Inspect the command queue and resolve blocking device or " +
-                "connectivity issues.",
-                RecommendationSeverity.Critical,
-                null);
-        }
-
-        if (highPending > 0)
+        if (snapshot.HighPendingCommands > 0)
         {
             Add(
                 recommendations,
                 "High-priority commands delayed",
-                $"{highPending} high-priority command(s) are pending. " +
+                $"{snapshot.HighPendingCommands} high-priority command(s) are pending. " +
                 "Review queue processing and device availability.",
                 RecommendationSeverity.Warning,
                 null);
         }
-        else if (pending >= 10)
+
+        if (snapshot.PendingCommands >= 10)
         {
             Add(
                 recommendations,
                 "Command queue backlog",
-                $"{pending} commands are pending. Check command processing, " +
-                "device connectivity, and whether retries are accumulating.",
+                $"{snapshot.PendingCommands} commands are pending. " +
+                "Check processing throughput, device connectivity, and retry behaviour.",
+                RecommendationSeverity.Warning,
+                null);
+        }
+
+        if (snapshot.FailedCommands > 0)
+        {
+            Add(
+                recommendations,
+                "Command reliability needs review",
+                $"{snapshot.FailedCommands} command(s) are recorded as failed. " +
+                "Inspect recurring device failures and resolve underlying connectivity or command issues.",
                 RecommendationSeverity.Warning,
                 null);
         }
     }
 
-    private static bool IsFailedStatus(string status) =>
-        Contains(status, "fail") ||
-        Contains(status, "error") ||
-        Contains(status, "reject");
+    private void AddCrossSignalRecommendations(
+        IReadOnlyList<TelemetryObservation> readings,
+        ICollection<SmartXRecommendation> recommendations)
+    {
+        var snapshot = _commandState.GetOperationalSnapshot(RecentCommandWindow);
 
-    private static bool IsPositiveFinite(double value) =>
-        double.IsFinite(value) && value > 0;
+        if (snapshot.ActiveErrorCount == 0 || readings.Count == 0)
+            return;
+
+        foreach (var group in readings.GroupBy(x => x.DeviceId))
+        {
+            var latest = group.OrderByDescending(x => x.ObservedAt).First();
+            if (DateTimeOffset.UtcNow - latest.ObservedAt > StaleReadingAge)
+                continue;
+
+            Add(
+                recommendations,
+                $"Correlated telemetry and system error: {DisplayMetric(latest.Metric)}",
+                $"Device {latest.DeviceId} is reporting recent {DisplayMetric(latest.Metric)} " +
+                $"telemetry ({FormatValue(latest.Value, latest.Unit)}) while the system has " +
+                "active errors. Check the device's command history and active error details " +
+                "before issuing further commands.",
+                RecommendationSeverity.Warning,
+                latest.DeviceId);
+        }
+    }
+
+    private static bool IsValidThreshold(double value) => double.IsFinite(value);
 
     private static void Add(
         ICollection<SmartXRecommendation> recommendations,
@@ -440,108 +388,21 @@ public sealed class RecommendationEngine
         });
     }
 
-    private static object? GetMemberValue(object? instance, string name)
-    {
-        if (instance is null)
-            return null;
-
-        var type = instance.GetType();
-
-        try
-        {
-            var property = type.GetProperty(
-                name,
-                BindingFlags.Instance | BindingFlags.Public |
-                BindingFlags.IgnoreCase);
-
-            if (property is not null &&
-                property.GetIndexParameters().Length == 0)
-                return property.GetValue(instance);
-
-            var field = type.GetField(
-                name,
-                BindingFlags.Instance | BindingFlags.Public |
-                BindingFlags.IgnoreCase);
-
-            return field?.GetValue(instance);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static IEnumerable<object?> Enumerate(object? value)
-    {
-        if (value is not IEnumerable enumerable || value is string)
-            yield break;
-
-        foreach (var item in enumerable)
-            yield return item;
-    }
-
-    private static Guid? ReadGuid(object? instance, string propertyName)
-    {
-        var value = GetMemberValue(instance, propertyName);
-
-        if (value is Guid guid)
-            return guid;
-
-        return Guid.TryParse(value?.ToString(), out var parsed)
-            ? parsed
-            : null;
-    }
-
-    private static int ReadNumber(object? instance, string propertyName)
-    {
-        var value = GetMemberValue(instance, propertyName);
-
-        if (value is null)
-            return 0;
-
-        try
-        {
-            return Convert.ToInt32(value, CultureInfo.InvariantCulture);
-        }
-        catch
-        {
-            return 0;
-        }
-    }
-
-    private static string ReadCommandName(object? command)
-    {
-        var value = GetMemberValue(command, "Command")
-                    ?? GetMemberValue(command, "Name")
-                    ?? GetMemberValue(command, "CommandName");
-
-        return string.IsNullOrWhiteSpace(value?.ToString())
-            ? "Unknown command"
-            : value!.ToString()!.Trim();
-    }
-
     private static string DisplayMetric(string? metric) =>
         string.IsNullOrWhiteSpace(metric) ? "sensor metric" : metric.Trim();
 
     private static string FormatValue(double value, string? unit)
     {
-        var formatted = value.ToString(
-            "0.##",
-            CultureInfo.InvariantCulture);
-
-        return string.IsNullOrWhiteSpace(unit)
-            ? formatted
-            : $"{formatted} {unit.Trim()}";
+        var formatted = value.ToString("0.##", CultureInfo.InvariantCulture);
+        return string.IsNullOrWhiteSpace(unit) ? formatted : $"{formatted} {unit.Trim()}";
     }
 
     private static string FormatAge(TimeSpan age)
     {
         if (age.TotalDays >= 1)
             return $"{age.TotalDays:0.#} days";
-
         if (age.TotalHours >= 1)
             return $"{age.TotalHours:0.#} hours";
-
         return $"{Math.Max(0, age.TotalMinutes):0} minutes";
     }
 
