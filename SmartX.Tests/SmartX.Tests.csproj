@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SmartX.Api\SmartX.Api.csproj" />
+    <ProjectReference Include="..\SmartX.Web\SmartX.Web.csproj" />
   </ItemGroup>
 
   <ItemGroup>
