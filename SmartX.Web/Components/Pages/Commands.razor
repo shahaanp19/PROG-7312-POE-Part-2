@@ -11,152 +11,299 @@
 <PageTitle>Command Stream | Smart-X</PageTitle>
 
 <div class="commands-page">
-    <header class="page-heading">
-        <div>
-            <span class="eyebrow">PART 2 / ADVANCED COLLECTIONS</span>
-            <h1>Command Stream</h1>
-            <p>Manage FIFO processing, priority scheduling, asynchronous critical alerts, and stack-based undo.</p>
+    <header class="commands-heading">
+        <div class="commands-heading-copy">
+            <div class="commands-breadcrumb">
+                <span class="breadcrumb-root">SMART-X</span>
+                <span class="breadcrumb-separator">/</span>
+                <span>COMMAND MANAGEMENT</span>
+            </div>
+
+            <div class="commands-title-row">
+                <div class="commands-title-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M5 7h14M5 12h9M5 17h6"
+                              stroke="currentColor"
+                              stroke-width="1.8"
+                              stroke-linecap="round" />
+                        <circle cx="18" cy="17" r="2.5"
+                                stroke="currentColor"
+                                stroke-width="1.8" />
+                    </svg>
+                </div>
+
+                <div>
+                    <span class="commands-eyebrow">PART 2 / ADVANCED COLLECTIONS</span>
+                    <h1>Command Stream</h1>
+                </div>
+            </div>
+
+            <p class="commands-description">
+                Manage command queues, priority scheduling, asynchronous critical alerts,
+                and stack-based undo from one operational workspace.
+            </p>
         </div>
-        <a class="back-link" href="/command-history">Command History →</a>
+
+        <a class="commands-header-link" href="/command-history">
+            <span>View command history</span>
+            <span aria-hidden="true">→</span>
+        </a>
     </header>
 
-    <section class="stats-grid" aria-label="Command statistics">
-        <article class="stat-card">
-            <span>Pending Commands</span>
-            <strong>@CommandState.QueueCount</strong>
+    <section class="commands-stats" aria-label="Command statistics">
+        <article class="commands-stat-card">
+            <div class="stat-topline">
+                <span class="stat-label">Pending commands</span>
+                <span class="stat-icon stat-icon-blue" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M5 6.5h14M5 12h14M5 17.5h9"
+                              stroke="currentColor"
+                              stroke-width="1.8"
+                              stroke-linecap="round" />
+                    </svg>
+                </span>
+            </div>
+            <strong class="stat-value">@CommandState.QueueCount</strong>
+            <span class="stat-caption">Awaiting processing</span>
         </article>
-        <article class="stat-card">
-            <span>Critical Pending</span>
-            <strong>@CommandState.CriticalQueueCount</strong>
+
+        <article class="commands-stat-card">
+            <div class="stat-topline">
+                <span class="stat-label">Critical pending</span>
+                <span class="stat-icon stat-icon-red" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M12 3.5 21 20H3L12 3.5Z"
+                              stroke="currentColor"
+                              stroke-width="1.8"
+                              stroke-linejoin="round" />
+                        <path d="M12 9v4.5m0 3h.01"
+                              stroke="currentColor"
+                              stroke-width="1.8"
+                              stroke-linecap="round" />
+                    </svg>
+                </span>
+            </div>
+            <strong class="stat-value">@CommandState.CriticalQueueCount</strong>
+            <span class="stat-caption">High-urgency workload</span>
         </article>
-        <article class="stat-card">
-            <span>Recorded Commands</span>
-            <strong>@CommandState.HistoryCount</strong>
+
+        <article class="commands-stat-card">
+            <div class="stat-topline">
+                <span class="stat-label">Recorded commands</span>
+                <span class="stat-icon stat-icon-violet" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M6 4.5h9l4 4v11H6v-15Z"
+                              stroke="currentColor"
+                              stroke-width="1.8"
+                              stroke-linejoin="round" />
+                        <path d="M14.5 4.5v4h4M9 13h7M9 16.5h7"
+                              stroke="currentColor"
+                              stroke-width="1.8"
+                              stroke-linecap="round"
+                              stroke-linejoin="round" />
+                    </svg>
+                </span>
+            </div>
+            <strong class="stat-value">@CommandState.HistoryCount</strong>
+            <span class="stat-caption">Available audit records</span>
         </article>
-        <article class="stat-card">
-            <span>Active Errors</span>
-            <strong>@CommandState.ActiveErrorCount</strong>
+
+        <article class="commands-stat-card">
+            <div class="stat-topline">
+                <span class="stat-label">Active errors</span>
+                <span class="stat-icon stat-icon-amber" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M12 4v9m0 4h.01"
+                              stroke="currentColor"
+                              stroke-width="2"
+                              stroke-linecap="round" />
+                        <circle cx="12" cy="12" r="9"
+                                stroke="currentColor"
+                                stroke-width="1.8" />
+                    </svg>
+                </span>
+            </div>
+            <strong class="stat-value">@CommandState.ActiveErrorCount</strong>
+            <span class="stat-caption">Requiring attention</span>
         </article>
     </section>
 
     @if (!string.IsNullOrWhiteSpace(_message))
     {
-        <div class="notice" role="status">@_message</div>
+        <div class="commands-notice" role="status" aria-live="polite">
+            <span class="notice-indicator" aria-hidden="true"></span>
+            <span class="notice-message">@_message</span>
+            <button class="notice-dismiss"
+                    type="button"
+                    aria-label="Dismiss notification"
+                    @onclick="DismissMessage">
+                ×
+            </button>
+        </div>
     }
 
-    <section class="panel">
+    <section class="commands-panel">
         <div class="panel-heading">
-            <div>
-                <h2>Submit Command</h2>
-                <p>Normal commands enter the managed collections. Critical alerts use a bounded asynchronous channel.</p>
+            <div class="panel-heading-copy">
+                <span class="panel-kicker">COMMAND INPUT</span>
+                <h2>Submit command</h2>
+                <p>Configure the target device, command payload, and processing priority.</p>
             </div>
+            <span class="panel-index">01</span>
         </div>
 
         <form class="command-form"
               @onsubmit="SubmitCommand"
               @onsubmit:preventDefault>
-            <div class="field">
-                <label for="deviceId">Device ID</label>
-                <input id="deviceId"
-                       @bind="_deviceId"
-                       required
-                       maxlength="100"
-                       placeholder="e.g. SENSOR-001" />
+            <div class="form-fields">
+                <div class="commands-field">
+                    <label for="deviceId">Device ID <span class="required-mark">*</span></label>
+                    <input id="deviceId"
+                           @bind="_deviceId"
+                           required
+                           maxlength="100"
+                           autocomplete="off"
+                           placeholder="e.g. SENSOR-001" />
+                    <small>Identifier of the target device</small>
+                </div>
+
+                <div class="commands-field">
+                    <label for="command">Command <span class="required-mark">*</span></label>
+                    <input id="command"
+                           @bind="_command"
+                           required
+                           maxlength="200"
+                           autocomplete="off"
+                           placeholder="e.g. ReadTemperature" />
+                    <small>Operation to enqueue or send as an alert</small>
+                </div>
+
+                <div class="commands-field">
+                    <label for="priority">Processing priority</label>
+                    <select id="priority" @bind="_priority">
+                        <option value="Normal">Normal</option>
+                        <option value="High">High</option>
+                        <option value="Critical">Critical</option>
+                    </select>
+                    <small>Used by priority-based scheduling</small>
+                </div>
+
+                <div class="commands-field">
+                    <label for="parameters">Parameters <span class="optional-mark">Optional</span></label>
+                    <input id="parameters"
+                           @bind="_parameters"
+                           maxlength="1000"
+                           autocomplete="off"
+                           placeholder="e.g. interval=5" />
+                    <small>Additional command arguments</small>
+                </div>
             </div>
 
-            <div class="field">
-                <label for="command">Command</label>
-                <input id="command"
-                       @bind="_command"
-                       required
-                       maxlength="200"
-                       placeholder="e.g. ReadTemperature" />
-            </div>
+            <div class="form-footer">
+                <p class="form-helper">
+                    <span class="required-mark">*</span>
+                    Required fields
+                </p>
 
-            <div class="field">
-                <label for="priority">Priority</label>
-                <select id="priority" @bind="_priority">
-                    <option value="Normal">Normal</option>
-                    <option value="High">High</option>
-                    <option value="Critical">Critical</option>
-                </select>
-            </div>
+                <div class="form-actions">
+                    <button class="commands-btn commands-btn-primary" type="submit">
+                        <span aria-hidden="true">+</span>
+                        Enqueue command
+                    </button>
 
-            <div class="field">
-                <label for="parameters">Parameters (optional)</label>
-                <input id="parameters"
-                       @bind="_parameters"
-                       maxlength="1000"
-                       placeholder="e.g. interval=5" />
-            </div>
-
-            <div class="form-actions">
-                <button class="btn btn-primary" type="submit">
-                    Enqueue Command
-                </button>
-                <button class="btn btn-critical"
-                        type="button"
-                        @onclick="SubmitCriticalAlert"
-                        disabled="@_submittingAlert">
-                    @(_submittingAlert ? "Submitting Alert..." : "Ingest Critical Alert")
-                </button>
+                    <button class="commands-btn commands-btn-critical"
+                            type="button"
+                            @onclick="SubmitCriticalAlert"
+                            disabled="@_submittingAlert">
+                        @if (_submittingAlert)
+                        {
+                            <span class="button-spinner" aria-hidden="true"></span>
+                            <span>Submitting alert…</span>
+                        }
+                        else
+                        {
+                            <span class="button-alert-icon" aria-hidden="true">!</span>
+                            <span>Ingest critical alert</span>
+                        }
+                    </button>
+                </div>
             </div>
         </form>
     </section>
 
-    <section class="panel">
-        <div class="panel-heading">
-            <div>
-                <h2>Queue Operations</h2>
-                <p>Choose FIFO processing or priority-based scheduling.</p>
+    <section class="commands-panel">
+        <div class="panel-heading panel-heading-queue">
+            <div class="panel-heading-copy">
+                <span class="panel-kicker">PROCESSING CONTROL</span>
+                <h2>Queue operations</h2>
+                <p>Process commands in FIFO order, schedule by priority, or undo pending work.</p>
             </div>
-            <span class="count-badge">@PendingCommands.Count pending</span>
+
+            <div class="panel-heading-metric">
+                <strong>@PendingCommands.Count</strong>
+                <span>pending</span>
+            </div>
         </div>
 
-        <div class="operation-bar">
-            <button class="btn btn-primary"
-                    type="button"
-                    @onclick="ProcessNext"
-                    disabled="@(PendingCommands.Count == 0)">
-                Process Next (FIFO)
-            </button>
+        <div class="queue-toolbar">
+            <div class="toolbar-group">
+                <button class="commands-btn commands-btn-primary"
+                        type="button"
+                        @onclick="ProcessNext"
+                        disabled="@(PendingCommands.Count == 0)">
+                    <span class="toolbar-button-icon" aria-hidden="true">→</span>
+                    Process next
+                    <span class="button-mode">FIFO</span>
+                </button>
 
-            <button class="btn btn-critical"
-                    type="button"
-                    @onclick="ProcessHighestPriority"
-                    disabled="@(PendingCommands.Count == 0)">
-                Process Highest Priority
-            </button>
+                <button class="commands-btn commands-btn-outline"
+                        type="button"
+                        @onclick="ProcessHighestPriority"
+                        disabled="@(PendingCommands.Count == 0)">
+                    <span class="toolbar-button-icon" aria-hidden="true">↑</span>
+                    Highest priority
+                </button>
+            </div>
 
-            <button class="btn btn-secondary"
-                    type="button"
-                    @onclick="UndoLast"
-                    disabled="@(PendingCommands.Count == 0)">
-                Undo Last (Stack)
-            </button>
+            <div class="toolbar-group toolbar-group-secondary">
+                <button class="commands-btn commands-btn-neutral"
+                        type="button"
+                        @onclick="UndoLast"
+                        disabled="@(PendingCommands.Count == 0)">
+                    Undo last
+                </button>
 
-            <button class="btn btn-danger"
-                    type="button"
-                    @onclick="ClearQueue"
-                    disabled="@(PendingCommands.Count == 0)">
-                Clear Queue
-            </button>
+                <button class="commands-btn commands-btn-danger-outline"
+                        type="button"
+                        @onclick="ClearQueue"
+                        disabled="@(PendingCommands.Count == 0)">
+                    Clear queue
+                </button>
+            </div>
         </div>
 
         @if (PendingCommands.Count == 0)
         {
-            <div class="empty-state">
+            <div class="commands-empty-state">
+                <span class="empty-state-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none">
+                        <path d="M5 6.5h14M5 12h14M5 17.5h9"
+                              stroke="currentColor"
+                              stroke-width="1.7"
+                              stroke-linecap="round" />
+                    </svg>
+                </span>
                 <strong>Queue is empty</strong>
-                <p>Submit a command or ingest a critical alert to begin.</p>
+                <p>New commands will appear here when they are enqueued.</p>
             </div>
         }
         else
         {
-            <div class="table-wrap">
-                <table>
+            <div class="commands-table-wrap">
+                <table class="commands-table">
                     <thead>
                         <tr>
-                            <th>FIFO Position</th>
+                            <th class="column-position">Position</th>
                             <th>Device</th>
                             <th>Command</th>
                             <th>Priority</th>
@@ -170,41 +317,59 @@
                             var record = PendingCommands[i];
 
                             <tr @key="record.Id">
-                                <td>@(i + 1)</td>
-                                <td class="device">@record.DeviceId</td>
-                                <td>@record.Command</td>
                                 <td>
-                                    <span class="priority @PriorityClass(record.Priority)">
+                                    <span class="position-number">@(i + 1)</span>
+                                </td>
+                                <td class="device-cell">@record.DeviceId</td>
+                                <td class="command-cell">@record.Command</td>
+                                <td>
+                                    <span class="priority-badge @PriorityClass(record.Priority)">
+                                        <span class="badge-dot" aria-hidden="true"></span>
                                         @record.Priority
                                     </span>
                                 </td>
-                                <td>@record.CreatedAt.ToLocalTime().ToString("HH:mm:ss.fff")</td>
+                                <td class="timestamp-cell">
+                                    @record.CreatedAt.ToLocalTime().ToString("HH:mm:ss.fff")
+                                </td>
                                 <td>
-                                    <span class="status status-queued">Queued</span>
+                                    <span class="command-status status-queued">
+                                        <span class="badge-dot" aria-hidden="true"></span>
+                                        Queued
+                                    </span>
                                 </td>
                             </tr>
                         }
                     </tbody>
                 </table>
             </div>
+            <div class="table-footer">
+                <span>Showing all @PendingCommands.Count pending command(s)</span>
+                <span>Queue order <strong>FIFO</strong></span>
+            </div>
         }
     </section>
 
-    <section class="panel">
-        <div class="panel-heading">
-            <div>
-                <h2>Command Recommendations</h2>
-                <p>Recommendations based on the current queue, history, and active errors.</p>
-            </div>
-        </div>
+    @{
+        var currentRecommendations = Recommendations.Generate();
+    }
 
-        @{
-            var currentRecommendations = Recommendations.Generate();
-        }
+    <section class="commands-panel">
+        <div class="panel-heading">
+            <div class="panel-heading-copy">
+                <span class="panel-kicker">INTELLIGENCE</span>
+                <h2>Command recommendations</h2>
+                <p>Insights generated from the current queue, command history, and active errors.</p>
+            </div>
+
+            <span class="recommendation-count">
+                @currentRecommendations.Count
+                @(currentRecommendations.Count == 1 ? "insight" : "insights")
+            </span>
+        </div>
 
         @if (currentRecommendations.Count == 0)
         {
-            <div class="empty-state">
+            <div class="commands-empty-state commands-empty-compact">
                 <strong>No recommendations</strong>
                 <p>No command-related issues were identified from the current application state.</p>
             </div>
@@ -215,48 +380,62 @@
                 @foreach (var item in currentRecommendations)
                 {
                     <article class="recommendation-item" @key="item.Title + item.DeviceId">
-                        <div class="recommendation-heading">
-                            <strong>@item.Title</strong>
-                            <span class="severity @SeverityClass(item.Severity)">
-                                @item.Severity
-                            </span>
+                        <div class="recommendation-severity-marker @SeverityClass(item.Severity)"
+                             aria-hidden="true"></div>
+
+                        <div class="recommendation-content">
+                            <div class="recommendation-heading">
+                                <h3>@item.Title</h3>
+                                <span class="severity-badge @SeverityClass(item.Severity)">
+                                    @item.Severity
+                                </span>
+                            </div>
+                            <p>@item.Description</p>
                         </div>
-                        <p>@item.Description</p>
                     </article>
                 }
             </div>
         }
     </section>
 
-    <section class="panel">
+    <section class="commands-panel">
         <div class="panel-heading">
-            <div>
-                <h2>Active Errors</h2>
-                <p>Record and resolve error keys with duplicate prevention.</p>
+            <div class="panel-heading-copy">
+                <span class="panel-kicker">SYSTEM HEALTH</span>
+                <h2>Active errors</h2>
+                <p>Track active error keys, prevent duplicates, and resolve issues as they are addressed.</p>
             </div>
-            <span class="count-badge">@CommandState.ActiveErrorCount active</span>
+
+            <div class="panel-heading-metric panel-heading-metric-alert">
+                <strong>@CommandState.ActiveErrorCount</strong>
+                <span>active</span>
+            </div>
         </div>
 
         <form class="error-form"
               @onsubmit="RecordError"
               @onsubmit:preventDefault>
-            <div class="field">
+            <div class="commands-field error-key-field">
                 <label for="errorKey">Error key</label>
                 <input id="errorKey"
                        @bind="_errorKey"
                        maxlength="200"
                        required
+                       autocomplete="off"
                        placeholder="e.g. SENSOR-001:OFFLINE" />
             </div>
-            <button class="btn btn-primary" type="submit">
-                Record Error
+
+            <button class="commands-btn commands-btn-primary error-submit-btn"
+                    type="submit">
+                Record error
             </button>
         </form>
 
         @if (ActiveErrors.Count == 0)
         {
-            <div class="empty-state">
+            <div class="commands-empty-state commands-empty-compact">
                 <strong>No active errors</strong>
+                <p>There are currently no active error keys to resolve.</p>
             </div>
         }
         else
@@ -265,8 +444,11 @@
                 @foreach (var error in ActiveErrors.OrderBy(x => x))
                 {
                     <li @key="error">
-                        <code>@error</code>
-                        <button class="btn btn-secondary"
+                        <div class="error-key-content">
+                            <span class="error-key-indicator" aria-hidden="true"></span>
+                            <code>@error</code>
+                        </div>
+                        <button class="commands-btn commands-btn-neutral commands-btn-small"
                                 type="button"
                                 @onclick="() => ResolveError(error)">
                             Resolve
@@ -277,25 +459,30 @@
         }
     </section>
 
-    <section class="panel">
+    <section class="commands-panel">
         <div class="panel-heading">
-            <div>
-                <h2>Recent Command History</h2>
-                <p>Latest command state transitions.</p>
+            <div class="panel-heading-copy">
+                <span class="panel-kicker">AUDIT TRAIL</span>
+                <h2>Recent command history</h2>
+                <p>The latest command state transitions recorded by the application.</p>
             </div>
-            <a class="back-link" href="/command-history">Full History &amp; Audit →</a>
+
+            <a class="panel-heading-link" href="/command-history">
+                Full history <span aria-hidden="true">→</span>
+            </a>
         </div>
 
         @if (RecentHistory.Count == 0)
         {
-            <div class="empty-state">
+            <div class="commands-empty-state commands-empty-compact">
                 <strong>No command history yet</strong>
+                <p>Processed commands and other state transitions will be listed here.</p>
             </div>
         }
         else
         {
-            <div class="table-wrap">
-                <table>
+            <div class="commands-table-wrap">
+                <table class="commands-table">
                     <thead>
                         <tr>
                             <th>Device</th>
@@ -309,32 +496,1416 @@
                         @foreach (var record in RecentHistory)
                         {
                             <tr @key="record.Id">
-                                <td class="device">@record.DeviceId</td>
-                                <td>@record.Command</td>
+                                <td class="device-cell">@record.DeviceId</td>
+                                <td class="command-cell">@record.Command</td>
                                 <td>
-                                    <span class="priority @PriorityClass(record.Priority)">
+                                    <span class="priority-badge @PriorityClass(record.Priority)">
+                                        <span class="badge-dot" aria-hidden="true"></span>
                                         @record.Priority
                                     </span>
                                 </td>
                                 <td>
-                                    <span class="status @StatusClass(record.Status)">
+                                    <span class="command-status @StatusClass(record.Status)">
+                                        <span class="badge-dot" aria-hidden="true"></span>
                                         @record.Status
                                     </span>
                                 </td>
-                                <td class="details">@record.Details</td>
+                                <td class="details-cell">@record.Details</td>
                             </tr>
                         }
                     </tbody>
                 </table>
             </div>
+            <div class="table-footer">
+                <span>Latest @RecentHistory.Count record(s)</span>
+                <a href="/command-history">View complete audit trail →</a>
+            </div>
         }
     </section>
 
-    <p class="disclaimer">
-        Processing updates local application state only. No physical device operation is executed.
-        Command state and audit records are held in memory for the current server-side application circuit.
-    </p>
+    <footer class="commands-disclaimer">
+        <span class="disclaimer-icon" aria-hidden="true">i</span>
+        <p>
+            <strong>Operational note</strong>
+            Processing updates local application state only. No physical device operation is executed.
+            Command state and audit records are held in memory for the current server-side application circuit.
+        </p>
+    </footer>
 </div>
+
+<style>
+    .commands-page {
+        --cmd-text: #19263b;
+        --cmd-muted: #718096;
+        --cmd-subtle: #93a0b2;
+        --cmd-border: #e5eaf2;
+        --cmd-border-strong: #d8e0ec;
+        --cmd-surface: #fff;
+        --cmd-background: #f5f7fb;
+        --cmd-primary: #316fe5;
+        --cmd-primary-hover: #245ac4;
+        --cmd-green: #16865e;
+        --cmd-red: #c83f4d;
+        --cmd-amber: #a86613;
+        --cmd-violet: #7251c7;
+        width: 100%;
+        max-width: 1500px;
+        min-width: 0;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+        color: var(--cmd-text);
+        font-family: Inter, "Segoe UI", Arial, sans-serif;
+        font-size: 13px;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+    }
+
+        .commands-page *,
+        .commands-page *::before,
+        .commands-page *::after {
+            box-sizing: border-box;
+        }
+
+    .commands-heading {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 4px 0 3px;
+    }
+
+    .commands-heading-copy {
+        min-width: 0;
+    }
+
+    .commands-breadcrumb {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin-bottom: 15px;
+        color: #8491a4;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 1.15px;
+    }
+
+    .breadcrumb-root {
+        color: #3d69b8;
+    }
+
+    .breadcrumb-separator {
+        color: #bdc7d5;
+    }
+
+    .commands-title-row {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+    }
+
+    .commands-title-icon {
+        width: 49px;
+        height: 49px;
+        flex: 0 0 49px;
+        display: grid;
+        place-items: center;
+        color: #326bd3;
+        background: #e8efff;
+        border: 1px solid #dce7ff;
+        border-radius: 13px;
+    }
+
+        .commands-title-icon svg {
+            width: 25px;
+            height: 25px;
+        }
+
+    .commands-eyebrow {
+        display: block;
+        margin-bottom: 4px;
+        color: #71819a;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 1.15px;
+    }
+
+    .commands-heading h1 {
+        margin: 0;
+        color: #16243a;
+        font-size: clamp(25px, 2.3vw, 32px);
+        font-weight: 780;
+        line-height: 1.2;
+        letter-spacing: -1.05px;
+    }
+
+    .commands-description {
+        max-width: 760px;
+        margin: 13px 0 0;
+        color: #6d7b90;
+        font-size: 12px;
+        line-height: 1.75;
+    }
+
+    .commands-header-link,
+    .panel-heading-link {
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 11px;
+        min-height: 38px;
+        padding: 0 13px;
+        border: 1px solid #dce4f0;
+        border-radius: 8px;
+        color: #375a92;
+        background: #fff;
+        font-size: 11px;
+        font-weight: 700;
+        text-decoration: none;
+        transition: background .16s ease, border-color .16s ease;
+    }
+
+        .commands-header-link:hover,
+        .panel-heading-link:hover {
+            color: #244f9c;
+            background: #f4f7fd;
+            border-color: #c8d7ef;
+        }
+
+        .commands-header-link:focus-visible,
+        .panel-heading-link:focus-visible {
+            outline: 2px solid #80aaff;
+            outline-offset: 3px;
+        }
+
+    .commands-stats {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+    }
+
+    .commands-stat-card {
+        min-width: 0;
+        min-height: 126px;
+        padding: 18px 19px 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        background: #fff;
+        border: 1px solid var(--cmd-border);
+        border-radius: 12px;
+        box-shadow: 0 2px 5px rgb(26 43 70 / 2%);
+    }
+
+    .stat-topline {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+    }
+
+    .stat-label {
+        color: #68778d;
+        font-size: 11px;
+        font-weight: 650;
+        line-height: 1.4;
+    }
+
+    .stat-icon {
+        width: 33px;
+        height: 33px;
+        flex: 0 0 33px;
+        display: grid;
+        place-items: center;
+        border-radius: 9px;
+    }
+
+        .stat-icon svg {
+            width: 18px;
+            height: 18px;
+        }
+
+    .stat-icon-blue {
+        color: #326bd3;
+        background: #edf3ff;
+    }
+
+    .stat-icon-red {
+        color: #c43f4a;
+        background: #fff0f0;
+    }
+
+    .stat-icon-violet {
+        color: #7251c7;
+        background: #f2edff;
+    }
+
+    .stat-icon-amber {
+        color: #a96a14;
+        background: #fff5e6;
+    }
+
+    .stat-value {
+        margin-top: 8px;
+        color: #17253a;
+        font-size: 29px;
+        font-weight: 780;
+        line-height: 1.1;
+        letter-spacing: -.8px;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .stat-caption {
+        margin-top: 6px;
+        color: #95a0b0;
+        font-size: 10px;
+        line-height: 1.4;
+    }
+
+    .commands-notice {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        padding: 12px 14px;
+        color: #31588e;
+        background: #edf4ff;
+        border: 1px solid #d6e5ff;
+        border-radius: 9px;
+        font-size: 12px;
+        line-height: 1.5;
+    }
+
+    .notice-indicator {
+        width: 7px;
+        height: 7px;
+        flex: 0 0 7px;
+        border-radius: 50%;
+        background: #3978ed;
+    }
+
+    .notice-message {
+        flex: 1;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .notice-dismiss {
+        width: 25px;
+        height: 25px;
+        flex: 0 0 25px;
+        display: grid;
+        place-items: center;
+        border: 0;
+        border-radius: 6px;
+        color: #55739f;
+        background: transparent;
+        font-size: 19px;
+        line-height: 1;
+        cursor: pointer;
+    }
+
+        .notice-dismiss:hover {
+            background: #dce9ff;
+        }
+
+    .commands-panel {
+        min-width: 0;
+        overflow: hidden;
+        background: var(--cmd-surface);
+        border: 1px solid var(--cmd-border);
+        border-radius: 12px;
+        box-shadow: 0 2px 5px rgb(26 43 70 / 2%);
+    }
+
+    .panel-heading {
+        min-height: 98px;
+        padding: 21px 23px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        border-bottom: 1px solid #edf0f5;
+    }
+
+    .panel-heading-copy {
+        min-width: 0;
+    }
+
+    .panel-kicker {
+        display: block;
+        margin-bottom: 5px;
+        color: #8190a6;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 1.1px;
+    }
+
+    .panel-heading h2 {
+        margin: 0;
+        color: #1a2940;
+        font-size: 17px;
+        font-weight: 750;
+        line-height: 1.35;
+        letter-spacing: -.25px;
+    }
+
+    .panel-heading p {
+        margin: 5px 0 0;
+        color: #7a879a;
+        font-size: 11px;
+        line-height: 1.65;
+    }
+
+    .panel-index {
+        flex: 0 0 auto;
+        color: #d7dfeb;
+        font-size: 24px;
+        font-weight: 750;
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .panel-heading-metric {
+        min-width: 80px;
+        flex: 0 0 auto;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 2px;
+    }
+
+        .panel-heading-metric strong {
+            color: #1c2a40;
+            font-size: 24px;
+            font-weight: 780;
+            line-height: 1.1;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .panel-heading-metric span {
+            color: #8491a3;
+            font-size: 10px;
+        }
+
+    .panel-heading-metric-alert strong {
+        color: #bd4350;
+    }
+
+    .command-form {
+        padding: 23px;
+    }
+
+    .form-fields {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 21px 22px;
+    }
+
+    .commands-field {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 7px;
+    }
+
+        .commands-field label {
+            min-height: 17px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            color: #35445a;
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1.4;
+        }
+
+    .required-mark {
+        color: #c83f4d;
+        font-weight: 800;
+    }
+
+    .optional-mark {
+        margin-left: auto;
+        color: #8a96a7;
+        font-size: 10px;
+        font-weight: 500;
+    }
+
+    .commands-field input,
+    .commands-field select {
+        width: 100%;
+        min-width: 0;
+        height: 42px;
+        padding: 0 12px;
+        border: 1px solid #dce3ed;
+        border-radius: 7px;
+        outline: none;
+        color: #25344a;
+        background: #fff;
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: 500;
+        line-height: normal;
+        transition: border-color .16s ease, box-shadow .16s ease;
+    }
+
+        .commands-field input::placeholder {
+            color: #a2adbc;
+            opacity: 1;
+        }
+
+        .commands-field input:hover,
+        .commands-field select:hover {
+            border-color: #bccbdd;
+        }
+
+        .commands-field input:focus,
+        .commands-field select:focus {
+            border-color: #6896ed;
+            box-shadow: 0 0 0 3px rgb(49 111 229 / 10%);
+        }
+
+    .commands-field small {
+        min-height: 15px;
+        color: #8c98a9;
+        font-size: 10px;
+        line-height: 1.5;
+    }
+
+    .form-footer {
+        margin-top: 23px;
+        padding-top: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        border-top: 1px solid #edf0f5;
+    }
+
+    .form-helper {
+        margin: 0;
+        color: #8995a6;
+        font-size: 10px;
+    }
+
+    .form-actions,
+    .queue-toolbar,
+    .toolbar-group {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+    }
+
+    .form-actions {
+        justify-content: flex-end;
+        flex-wrap: wrap;
+    }
+
+    .commands-btn {
+        min-height: 38px;
+        padding: 0 13px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        border: 1px solid transparent;
+        border-radius: 7px;
+        font-family: inherit;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.3;
+        text-align: center;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: background .16s ease, border-color .16s ease, color .16s ease, box-shadow .16s ease;
+    }
+
+        .commands-btn:focus-visible {
+            outline: 2px solid #80aaff;
+            outline-offset: 3px;
+        }
+
+        .commands-btn:disabled {
+            opacity: .43;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+    .commands-btn-primary {
+        color: #fff;
+        background: var(--cmd-primary);
+        border-color: var(--cmd-primary);
+        box-shadow: 0 2px 4px rgb(49 111 229 / 10%);
+    }
+
+        .commands-btn-primary:hover:not(:disabled) {
+            background: var(--cmd-primary-hover);
+            border-color: var(--cmd-primary-hover);
+        }
+
+    .commands-btn-critical {
+        color: #fff;
+        background: #c83f4d;
+        border-color: #c83f4d;
+    }
+
+        .commands-btn-critical:hover:not(:disabled) {
+            background: #ad303d;
+            border-color: #ad303d;
+        }
+
+    .commands-btn-outline {
+        color: #365e9f;
+        background: #fff;
+        border-color: #d8e2f0;
+    }
+
+        .commands-btn-outline:hover:not(:disabled) {
+            background: #f2f6fd;
+            border-color: #b8cbe8;
+        }
+
+    .commands-btn-neutral {
+        color: #536176;
+        background: #fff;
+        border-color: #dce3ed;
+    }
+
+        .commands-btn-neutral:hover:not(:disabled) {
+            color: #2e4059;
+            background: #f6f8fb;
+            border-color: #c5cfdd;
+        }
+
+    .commands-btn-danger-outline {
+        color: #b6404a;
+        background: #fff;
+        border-color: #f0d3d6;
+    }
+
+        .commands-btn-danger-outline:hover:not(:disabled) {
+            background: #fff5f5;
+            border-color: #e8b9be;
+        }
+
+    .button-alert-icon {
+        width: 17px;
+        height: 17px;
+        display: grid;
+        place-items: center;
+        border: 1px solid rgb(255 255 255 / 60%);
+        border-radius: 50%;
+        font-size: 10px;
+        font-weight: 800;
+    }
+
+    .button-spinner {
+        width: 13px;
+        height: 13px;
+        border: 2px solid rgb(255 255 255 / 40%);
+        border-top-color: #fff;
+        border-radius: 50%;
+        animation: commands-spin .7s linear infinite;
+    }
+
+    @@keyframes commands-spin {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+
+    .queue-toolbar {
+        min-height: 65px;
+        padding: 13px 22px;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        background: #fbfcfe;
+        border-bottom: 1px solid #edf0f5;
+    }
+
+    .toolbar-group {
+        flex-wrap: wrap;
+    }
+
+    .toolbar-button-icon {
+        font-size: 16px;
+        font-weight: 500;
+        line-height: 1;
+    }
+
+    .button-mode {
+        padding: 3px 5px;
+        border-radius: 4px;
+        color: #fff;
+        background: rgb(255 255 255 / 17%);
+        font-size: 8px;
+        font-weight: 800;
+        letter-spacing: .4px;
+    }
+
+    .commands-empty-state {
+        min-height: 205px;
+        padding: 28px 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+
+    .empty-state-icon {
+        width: 43px;
+        height: 43px;
+        margin-bottom: 12px;
+        display: grid;
+        place-items: center;
+        border: 1px solid #e3eaf4;
+        border-radius: 12px;
+        color: #7d92b1;
+        background: #f6f8fc;
+    }
+
+        .empty-state-icon svg {
+            width: 22px;
+            height: 22px;
+        }
+
+    .commands-empty-state > strong {
+        color: #34445a;
+        font-size: 12px;
+        font-weight: 750;
+    }
+
+    .commands-empty-state > p {
+        max-width: 420px;
+        margin: 5px 0 0;
+        color: #8995a6;
+        font-size: 11px;
+        line-height: 1.65;
+    }
+
+    .commands-empty-compact {
+        min-height: 130px;
+        padding: 24px 20px;
+    }
+
+    .commands-table-wrap {
+        width: 100%;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+    }
+
+    .commands-table {
+        width: 100%;
+        min-width: 740px;
+        border-collapse: separate;
+        border-spacing: 0;
+        color: #344257;
+        font-size: 11px;
+        text-align: left;
+    }
+
+        .commands-table thead {
+            background: #f7f9fc;
+        }
+
+        .commands-table th {
+            height: 42px;
+            padding: 0 15px;
+            color: #718096;
+            background: #f7f9fc;
+            border-bottom: 1px solid #e8edf4;
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: .45px;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .commands-table td {
+            height: 53px;
+            padding: 9px 15px;
+            border-bottom: 1px solid #edf0f5;
+            vertical-align: middle;
+            line-height: 1.5;
+        }
+
+        .commands-table tbody tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .commands-table tbody tr {
+            transition: background .12s ease;
+        }
+
+            .commands-table tbody tr:hover {
+                background: #fafcff;
+            }
+
+    .column-position {
+        width: 100px;
+    }
+
+    .position-number {
+        width: 25px;
+        height: 25px;
+        display: inline-grid;
+        place-items: center;
+        border: 1px solid #e3eaf3;
+        border-radius: 6px;
+        color: #6e7d92;
+        background: #f7f9fc;
+        font-size: 10px;
+        font-weight: 750;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .device-cell {
+        min-width: 130px;
+        color: #34445b;
+        font-weight: 700;
+        overflow-wrap: anywhere;
+    }
+
+    .command-cell {
+        min-width: 140px;
+        color: #435169;
+        font-weight: 550;
+        overflow-wrap: anywhere;
+    }
+
+    .timestamp-cell {
+        color: #718096;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 10px;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .priority-badge,
+    .command-status,
+    .severity-badge {
+        width: fit-content;
+        max-width: 100%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 4px 8px;
+        border: 1px solid transparent;
+        border-radius: 5px;
+        font-size: 9px;
+        font-weight: 750;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+
+    .badge-dot {
+        width: 5px;
+        height: 5px;
+        flex: 0 0 5px;
+        border-radius: 50%;
+        background: currentColor;
+    }
+
+    .priority-normal {
+        color: #53677f;
+        background: #f1f4f8;
+        border-color: #e4eaf1;
+    }
+
+    .priority-high {
+        color: #a76516;
+        background: #fff5e7;
+        border-color: #f5e2c5;
+    }
+
+    .priority-critical {
+        color: #bd3947;
+        background: #fff0f1;
+        border-color: #f3d5d8;
+    }
+
+    .status-queued {
+        color: #3267b7;
+        background: #edf4ff;
+        border-color: #d9e7ff;
+    }
+
+    .status-processed {
+        color: #187c59;
+        background: #eaf8f1;
+        border-color: #d2eddf;
+    }
+
+    .status-undone {
+        color: #7754bd;
+        background: #f2edff;
+        border-color: #e2d9fb;
+    }
+
+    .status-cleared {
+        color: #647185;
+        background: #f1f4f8;
+        border-color: #e1e6ed;
+    }
+
+    .table-footer {
+        min-height: 43px;
+        padding: 11px 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        border-top: 1px solid #edf0f5;
+        color: #8793a5;
+        background: #fcfdff;
+        font-size: 10px;
+    }
+
+        .table-footer strong {
+            color: #64738a;
+            font-weight: 800;
+        }
+
+        .table-footer a {
+            color: #3568b9;
+            font-weight: 700;
+            text-decoration: none;
+        }
+
+            .table-footer a:hover {
+                text-decoration: underline;
+            }
+
+    .recommendation-count {
+        flex: 0 0 auto;
+        padding: 6px 9px;
+        border: 1px solid #dfe7f4;
+        border-radius: 6px;
+        color: #567098;
+        background: #f6f9ff;
+        font-size: 10px;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .recommendation-list {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .recommendation-item {
+        min-width: 0;
+        padding: 17px 22px;
+        display: flex;
+        align-items: stretch;
+        gap: 15px;
+        border-bottom: 1px solid #edf0f5;
+    }
+
+        .recommendation-item:last-child {
+            border-bottom: 0;
+        }
+
+    .recommendation-severity-marker {
+        width: 3px;
+        flex: 0 0 3px;
+        border-radius: 4px;
+        background: #8da2c2;
+    }
+
+        .recommendation-severity-marker.severity-critical {
+            background: #cf4652;
+        }
+
+        .recommendation-severity-marker.severity-warning {
+            background: #d79535;
+        }
+
+        .recommendation-severity-marker.severity-info {
+            background: #4a83e6;
+        }
+
+    .recommendation-content {
+        min-width: 0;
+        flex: 1;
+    }
+
+    .recommendation-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 15px;
+    }
+
+        .recommendation-heading h3 {
+            min-width: 0;
+            margin: 0;
+            color: #293950;
+            font-size: 12px;
+            font-weight: 750;
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+        }
+
+    .recommendation-content > p {
+        margin: 6px 0 0;
+        color: #748197;
+        font-size: 11px;
+        line-height: 1.75;
+        overflow-wrap: anywhere;
+    }
+
+    .severity-badge.severity-critical {
+        color: #bd3947;
+        background: #fff0f1;
+        border-color: #f3d5d8;
+    }
+
+    .severity-badge.severity-warning {
+        color: #a76516;
+        background: #fff5e7;
+        border-color: #f5e2c5;
+    }
+
+    .severity-badge.severity-info {
+        color: #3267b7;
+        background: #edf4ff;
+        border-color: #d9e7ff;
+    }
+
+    .error-form {
+        padding: 20px 22px;
+        display: flex;
+        align-items: flex-end;
+        gap: 13px;
+        border-bottom: 1px solid #edf0f5;
+        background: #fcfdff;
+    }
+
+    .error-key-field {
+        flex: 1;
+    }
+
+    .error-submit-btn {
+        min-width: 122px;
+    }
+
+    .error-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+    }
+
+        .error-list li {
+            min-width: 0;
+            min-height: 58px;
+            padding: 10px 22px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            border-bottom: 1px solid #edf0f5;
+        }
+
+            .error-list li:last-child {
+                border-bottom: 0;
+            }
+
+    .error-key-content {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 11px;
+    }
+
+    .error-key-indicator {
+        width: 7px;
+        height: 7px;
+        flex: 0 0 7px;
+        border-radius: 50%;
+        background: #c83f4d;
+        box-shadow: 0 0 0 3px #fff0f1;
+    }
+
+    .error-key-content code {
+        min-width: 0;
+        color: #46566d;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        font-size: 11px;
+        overflow-wrap: anywhere;
+    }
+
+    .commands-btn-small {
+        min-height: 30px;
+        padding: 0 10px;
+        font-size: 10px;
+    }
+
+    .details-cell {
+        min-width: 170px;
+        max-width: 320px;
+        color: #78859a;
+        overflow-wrap: anywhere;
+    }
+
+    .commands-disclaimer {
+        padding: 14px 16px;
+        display: flex;
+        align-items: flex-start;
+        gap: 11px;
+        border: 1px solid #e2e8f1;
+        border-radius: 9px;
+        background: #f9fbfe;
+    }
+
+    .disclaimer-icon {
+        width: 18px;
+        height: 18px;
+        flex: 0 0 18px;
+        display: grid;
+        place-items: center;
+        border: 1px solid #cbd6e5;
+        border-radius: 50%;
+        color: #72849e;
+        font-family: Georgia, serif;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1;
+    }
+
+    .commands-disclaimer p {
+        margin: 0;
+        color: #7a8799;
+        font-size: 10px;
+        line-height: 1.8;
+    }
+
+        .commands-disclaimer p strong {
+            margin-right: 5px;
+            color: #4e5f76;
+            font-weight: 800;
+        }
+
+    @@media (min-width: 1500px) {
+        .commands-page {
+            gap: 24px;
+        }
+
+        .commands-stats {
+            gap: 19px;
+        }
+
+        .commands-stat-card {
+            padding: 20px 22px 18px;
+        }
+
+        .panel-heading {
+            padding-right: 26px;
+            padding-left: 26px;
+        }
+
+        .command-form {
+            padding: 26px;
+        }
+
+        .queue-toolbar {
+            padding-right: 26px;
+            padding-left: 26px;
+        }
+    }
+
+    @@media (max-width: 1100px) {
+        .commands-page {
+            gap: 18px;
+        }
+
+        .commands-stats {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 13px;
+        }
+
+        .commands-stat-card {
+            min-height: 117px;
+        }
+
+        .queue-toolbar {
+            align-items: flex-start;
+            flex-direction: column;
+        }
+
+        .toolbar-group-secondary {
+            padding-top: 1px;
+        }
+    }
+
+    @@media (max-width: 760px) {
+        .commands-heading {
+            align-items: flex-start;
+            flex-direction: column;
+            gap: 17px;
+        }
+
+            .commands-heading h1 {
+                font-size: 27px;
+            }
+
+        .commands-header-link {
+            min-height: 36px;
+        }
+
+        .commands-description {
+            max-width: 600px;
+        }
+
+        .panel-heading {
+            min-height: auto;
+            padding: 19px;
+        }
+
+        .command-form {
+            padding: 19px;
+        }
+
+        .form-fields {
+            gap: 18px;
+        }
+
+        .form-footer {
+            align-items: flex-start;
+            flex-direction: column;
+            gap: 13px;
+        }
+
+        .form-actions {
+            width: 100%;
+            justify-content: flex-start;
+        }
+
+        .queue-toolbar {
+            padding: 13px 17px;
+        }
+
+        .error-form {
+            padding: 18px;
+        }
+
+        .error-list li {
+            padding-right: 18px;
+            padding-left: 18px;
+        }
+    }
+
+    @@media (max-width: 520px) {
+        .commands-page {
+            gap: 15px;
+        }
+
+        .commands-breadcrumb {
+            margin-bottom: 12px;
+            font-size: 8px;
+            letter-spacing: .85px;
+        }
+
+        .commands-title-row {
+            align-items: flex-start;
+            gap: 11px;
+        }
+
+        .commands-title-icon {
+            width: 40px;
+            height: 40px;
+            flex-basis: 40px;
+            border-radius: 10px;
+        }
+
+            .commands-title-icon svg {
+                width: 21px;
+                height: 21px;
+            }
+
+        .commands-eyebrow {
+            margin-top: 1px;
+            font-size: 8px;
+            letter-spacing: .65px;
+        }
+
+        .commands-heading h1 {
+            font-size: 24px;
+            letter-spacing: -.7px;
+        }
+
+        .commands-description {
+            margin-top: 11px;
+            font-size: 11px;
+        }
+
+        .commands-stats {
+            gap: 10px;
+        }
+
+        .commands-stat-card {
+            min-height: 111px;
+            padding: 13px;
+            border-radius: 10px;
+        }
+
+        .stat-label {
+            font-size: 10px;
+        }
+
+        .stat-icon {
+            width: 28px;
+            height: 28px;
+            flex-basis: 28px;
+            border-radius: 8px;
+        }
+
+            .stat-icon svg {
+                width: 16px;
+                height: 16px;
+            }
+
+        .stat-value {
+            margin-top: 9px;
+            font-size: 25px;
+        }
+
+        .stat-caption {
+            font-size: 9px;
+        }
+
+        .panel-heading {
+            padding: 16px;
+            gap: 10px;
+        }
+
+            .panel-heading h2 {
+                font-size: 15px;
+            }
+
+            .panel-heading p {
+                font-size: 10px;
+            }
+
+        .panel-index {
+            font-size: 20px;
+        }
+
+        .panel-heading-metric {
+            min-width: 48px;
+        }
+
+            .panel-heading-metric strong {
+                font-size: 21px;
+            }
+
+        .command-form {
+            padding: 16px;
+        }
+
+        .form-fields {
+            grid-template-columns: minmax(0, 1fr);
+            gap: 15px;
+        }
+
+        .commands-field small {
+            min-height: 0;
+        }
+
+        .form-actions {
+            align-items: stretch;
+            flex-direction: column;
+        }
+
+            .form-actions .commands-btn {
+                width: 100%;
+            }
+
+        .queue-toolbar {
+            padding: 13px;
+            gap: 10px;
+        }
+
+        .toolbar-group {
+            width: 100%;
+            align-items: stretch;
+            flex-direction: column;
+        }
+
+            .toolbar-group .commands-btn {
+                width: 100%;
+            }
+
+        .toolbar-group-secondary {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+            .toolbar-group-secondary .commands-btn {
+                min-width: 0;
+                padding: 0 8px;
+                white-space: normal;
+            }
+
+        .recommendation-item {
+            padding: 15px;
+            gap: 11px;
+        }
+
+        .recommendation-heading {
+            align-items: flex-start;
+            flex-direction: column;
+            gap: 7px;
+        }
+
+        .error-form {
+            align-items: stretch;
+            flex-direction: column;
+            padding: 16px;
+        }
+
+        .error-submit-btn {
+            width: 100%;
+        }
+
+        .error-list li {
+            align-items: flex-start;
+            padding: 12px 15px;
+            gap: 10px;
+        }
+
+        .error-key-content {
+            padding-top: 7px;
+        }
+
+        .table-footer {
+            align-items: flex-start;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .commands-disclaimer {
+            padding: 12px;
+        }
+    }
+
+    @@media (prefers-reduced-motion: reduce) {
+        .commands-page *,
+        .commands-page *::before,
+        .commands-page *::after {
+            scroll-behavior: auto !important;
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+        }
+    }
+</style>
 
 @code {
     private string _deviceId = string.Empty;
@@ -357,6 +1928,11 @@
     protected override void OnInitialized()
     {
         CommandState.StateChanged += HandleStateChanged;
+    }
+
+    private void DismissMessage()
+    {
+        _message = string.Empty;
     }
 
     private void SubmitCommand()

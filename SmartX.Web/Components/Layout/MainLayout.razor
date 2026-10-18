@@ -3,14 +3,15 @@
 <div class="app-shell">
     <header class="app-topbar">
         <a class="brand" href="/" aria-label="Smart-X dashboard">
-            <span class="brand-mark">S</span>
+            <span class="brand-mark" aria-hidden="true">S</span>
+
             <span class="brand-copy">
                 <span class="brand-name">SMART-X</span>
                 <span class="brand-subtitle">IoT Gateway Ecosystem</span>
             </span>
         </a>
 
-        <div class="gateway-status" aria-label="Gateway interface status">
+        <div class="gateway-status" aria-label="Gateway interface">
             <span class="status-dot" aria-hidden="true"></span>
             <span>Gateway Interface</span>
             <span class="gateway-status-divider" aria-hidden="true"></span>
@@ -26,8 +27,10 @@
 
     <footer class="app-footer">
         <div class="footer-brand">
-            <span class="footer-mark">S</span>
-            <span>SMART-X <span class="footer-separator">/</span> IoT GATEWAY</span>
+            <span class="footer-mark" aria-hidden="true">S</span>
+            <span>
+                SMART-X <span class="footer-separator">/</span> IoT GATEWAY
+            </span>
         </div>
 
         <div class="footer-meta">
@@ -40,10 +43,10 @@
     </footer>
 </div>
 
-<div id="blazor-error-ui" data-nosnippet>
+<div id="blazor-error-ui" data-nosnippet role="alert">
     <div class="error-ui-content">
         <span class="error-ui-icon" aria-hidden="true">!</span>
-        <span>
+        <span class="error-ui-message">
             <strong>Connection interrupted</strong>
             <small>An unexpected application error occurred.</small>
         </span>
@@ -61,33 +64,40 @@
 </div>
 
 <style>
-    :root {
-        --sx-navy: #101a2e;
-        --sx-blue: #3978ed;
-        --sx-blue-strong: #245fd1;
-        --sx-text: #19243a;
-        --sx-muted: #718096;
-        --sx-border: #e2e8f0;
-        --sx-surface: #ffffff;
-        --sx-background: #f4f7fb;
-        --sx-green: #20a875;
-    }
-
     .app-shell {
+        --sx-navy: #111c31;
+        --sx-navy-soft: #192943;
+        --sx-blue: #3978ed;
+        --sx-blue-light: #eaf1ff;
+        --sx-text: #1b2940;
+        --sx-muted: #738198;
+        --sx-border: #e4eaf2;
+        --sx-surface: #ffffff;
+        --sx-background: #f5f7fb;
+        --sx-green: #24b47e;
         min-height: 100vh;
         display: flex;
         flex-direction: column;
         color: var(--sx-text);
         background: var(--sx-background);
         font-family: Inter, "Segoe UI", Arial, sans-serif;
+        font-size: 14px;
+        line-height: 1.5;
         -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
     }
+
+        .app-shell *,
+        .app-shell *::before,
+        .app-shell *::after {
+            box-sizing: border-box;
+        }
 
     .app-topbar {
         position: relative;
-        z-index: 2;
-        min-height: 78px;
-        padding: 0 34px;
+        z-index: 10;
+        min-height: 76px;
+        padding: 0 32px;
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -113,9 +123,9 @@
         }
 
     .brand-mark {
-        width: 43px;
-        height: 43px;
-        flex: 0 0 43px;
+        width: 42px;
+        height: 42px;
+        flex: 0 0 42px;
         display: grid;
         place-items: center;
         border: 1px solid rgb(255 255 255 / 16%);
@@ -125,34 +135,43 @@
         box-shadow: 0 4px 14px rgb(0 0 0 / 15%);
         font-size: 23px;
         font-weight: 850;
+        line-height: 1;
     }
 
     .brand-copy {
         min-width: 0;
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        align-items: flex-start;
+        gap: 3px;
     }
 
     .brand-name {
-        font-size: 17px;
+        color: #fff;
+        font-size: 16px;
         font-weight: 850;
+        line-height: 1.2;
         letter-spacing: 2px;
     }
 
     .brand-subtitle {
         color: #aab8ce;
         font-size: 11px;
-        letter-spacing: .25px;
+        font-weight: 400;
+        line-height: 1.4;
+        letter-spacing: .2px;
     }
 
     .gateway-status {
+        min-width: 0;
         display: flex;
         align-items: center;
+        justify-content: flex-end;
         gap: 10px;
         color: #dbe4f1;
         font-size: 12px;
         font-weight: 600;
+        white-space: nowrap;
     }
 
     .status-dot {
@@ -161,12 +180,13 @@
         flex: 0 0 8px;
         border-radius: 50%;
         background: var(--sx-green);
-        box-shadow: 0 0 0 4px rgb(32 168 117 / 13%);
+        box-shadow: 0 0 0 4px rgb(36 180 126 / 13%);
     }
 
     .gateway-status-divider {
         width: 1px;
         height: 18px;
+        flex: 0 0 1px;
         margin: 0 2px;
         background: rgb(255 255 255 / 20%);
     }
@@ -180,14 +200,22 @@
 
     .app-main {
         width: 100%;
+        max-width: 1720px;
+        min-width: 0;
         flex: 1 0 auto;
+        margin: 0 auto;
         padding: 30px 34px;
         outline: none;
     }
 
+        .app-main:focus {
+            outline: none;
+        }
+
     .app-footer {
+        width: 100%;
         min-height: 57px;
-        padding: 16px 34px;
+        padding: 15px 34px;
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -196,10 +224,12 @@
         background: var(--sx-surface);
         border-top: 1px solid var(--sx-border);
         font-size: 10px;
+        line-height: 1.5;
     }
 
     .footer-brand,
     .footer-meta {
+        min-width: 0;
         display: flex;
         align-items: center;
         gap: 9px;
@@ -210,18 +240,21 @@
         font-size: 9px;
         font-weight: 850;
         letter-spacing: .65px;
+        white-space: nowrap;
     }
 
     .footer-mark {
-        width: 20px;
-        height: 20px;
+        width: 21px;
+        height: 21px;
+        flex: 0 0 21px;
         display: grid;
         place-items: center;
-        border-radius: 5px;
+        border-radius: 6px;
         color: #fff;
         background: var(--sx-navy);
         font-size: 11px;
         font-weight: 850;
+        line-height: 1;
     }
 
     .footer-separator {
@@ -233,12 +266,14 @@
         flex-wrap: wrap;
         justify-content: flex-end;
         gap: 8px;
+        color: #738198;
         font-size: 10px;
     }
 
     .footer-bullet {
         width: 3px;
         height: 3px;
+        flex: 0 0 3px;
         border-radius: 50%;
         background: #9aa7b8;
     }
@@ -248,7 +283,7 @@
         right: 18px;
         bottom: 18px;
         left: 18px;
-        z-index: 1000;
+        z-index: 10000;
         padding: 15px 18px;
         display: none;
         align-items: center;
@@ -257,11 +292,13 @@
         color: #7b2525;
         background: #fff5f4;
         border: 1px solid #f0c0bc;
-        border-radius: 10px;
+        border-radius: 12px;
         box-shadow: 0 8px 30px rgb(16 26 46 / 14%);
+        font-family: Inter, "Segoe UI", Arial, sans-serif;
     }
 
         #blazor-error-ui .error-ui-content {
+            min-width: 0;
             display: flex;
             align-items: center;
             gap: 11px;
@@ -276,25 +313,33 @@
             border-radius: 50%;
             color: #fff;
             background: #b93832;
+            font-size: 14px;
             font-weight: 850;
+            line-height: 1;
         }
 
-        #blazor-error-ui .error-ui-content span:last-child {
+        #blazor-error-ui .error-ui-message {
+            min-width: 0;
             display: flex;
             flex-direction: column;
             gap: 3px;
         }
 
-        #blazor-error-ui .error-ui-content strong {
-            font-size: 12px;
-        }
+            #blazor-error-ui .error-ui-message strong {
+                color: #7b2525;
+                font-size: 12px;
+                font-weight: 750;
+                line-height: 1.4;
+            }
 
-        #blazor-error-ui .error-ui-content small {
-            color: #8e5652;
-            font-size: 11px;
-        }
+            #blazor-error-ui .error-ui-message small {
+                color: #8e5652;
+                font-size: 11px;
+                line-height: 1.5;
+            }
 
         #blazor-error-ui .error-ui-actions {
+            flex: 0 0 auto;
             display: flex;
             align-items: center;
             gap: 15px;
@@ -312,14 +357,25 @@
                 text-decoration: underline;
             }
 
+            #blazor-error-ui .reload:focus-visible,
+            #blazor-error-ui .dismiss:focus-visible {
+                outline: 2px solid #245fc1;
+                outline-offset: 3px;
+            }
+
         #blazor-error-ui .dismiss {
             width: 28px;
             height: 28px;
+            flex: 0 0 28px;
+            display: grid;
+            place-items: center;
             border: 0;
             border-radius: 6px;
             color: #7b2525;
             background: transparent;
+            font-family: inherit;
             font-size: 22px;
+            line-height: 1;
             cursor: pointer;
         }
 
@@ -330,13 +386,33 @@
     @@media (min-width: 1500px) {
         .app-topbar,
         .app-footer {
-            padding-right: max(34px, calc((100vw - 1600px) / 2));
-            padding-left: max(34px, calc((100vw - 1600px) / 2));
+            padding-right: max(34px, calc((100vw - 1652px) / 2));
+            padding-left: max(34px, calc((100vw - 1652px) / 2));
+        }
+    }
+
+    @@media (max-width: 1000px) {
+        .app-topbar {
+            padding-right: 24px;
+            padding-left: 24px;
         }
 
         .app-main {
-            padding-right: max(34px, calc((100vw - 1600px) / 2));
-            padding-left: max(34px, calc((100vw - 1600px) / 2));
+            padding: 26px 24px;
+        }
+
+        .app-footer {
+            padding-right: 24px;
+            padding-left: 24px;
+        }
+
+        .gateway-status {
+            gap: 8px;
+        }
+
+        .gateway-status-label {
+            font-size: 8px;
+            letter-spacing: .7px;
         }
     }
 
@@ -344,6 +420,7 @@
         .app-topbar {
             min-height: 70px;
             padding: 0 20px;
+            gap: 16px;
         }
 
         .gateway-status-label,
@@ -358,21 +435,34 @@
         .app-footer {
             padding: 15px 20px;
         }
+
+        .footer-meta {
+            gap: 7px;
+        }
     }
 
-    @@media (max-width: 480px) {
+    @@media (max-width: 560px) {
         .app-topbar {
-            padding: 0 14px;
+            align-items: center;
+            padding: 0 16px;
+            gap: 10px;
+        }
+
+        .brand {
+            gap: 9px;
         }
 
         .brand-mark {
-            width: 37px;
-            height: 37px;
-            flex-basis: 37px;
+            width: 38px;
+            height: 38px;
+            flex-basis: 38px;
+            border-radius: 10px;
+            font-size: 21px;
         }
 
         .brand-name {
             font-size: 14px;
+            letter-spacing: 1.6px;
         }
 
         .brand-subtitle {
@@ -384,31 +474,76 @@
             font-size: 10px;
         }
 
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            flex-basis: 7px;
+        }
+
         .app-main {
-            padding: 20px 14px;
+            padding: 20px 16px;
         }
 
         .app-footer {
             align-items: flex-start;
             flex-direction: column;
-            padding: 14px;
+            padding: 14px 16px;
             gap: 10px;
         }
 
         .footer-meta {
             justify-content: flex-start;
         }
+    }
+
+    @@media (max-width: 380px) {
+        .app-topbar {
+            padding-right: 12px;
+            padding-left: 12px;
+        }
+
+        .brand {
+            gap: 7px;
+        }
+
+        .brand-mark {
+            width: 34px;
+            height: 34px;
+            flex-basis: 34px;
+            font-size: 19px;
+        }
+
+        .brand-name {
+            font-size: 12px;
+            letter-spacing: 1.2px;
+        }
+
+        .brand-subtitle {
+            font-size: 9px;
+        }
+
+        .gateway-status {
+            gap: 6px;
+            font-size: 9px;
+        }
+
+        .app-main {
+            padding: 18px 12px;
+        }
+
+        .app-footer {
+            padding: 13px 12px;
+        }
 
         #blazor-error-ui {
             right: 10px;
             bottom: 10px;
             left: 10px;
-            align-items: flex-start;
             padding: 12px;
             gap: 10px;
         }
 
-            #blazor-error-ui .error-ui-content small {
+            #blazor-error-ui .error-ui-message small {
                 max-width: 190px;
                 line-height: 1.4;
             }
@@ -423,9 +558,9 @@
     }
 
     @@media (prefers-reduced-motion: reduce) {
-        *,
-        *::before,
-        *::after {
+        .app-shell *,
+        .app-shell *::before,
+        .app-shell *::after {
             scroll-behavior: auto !important;
             transition-duration: 0.01ms !important;
             animation-duration: 0.01ms !important;

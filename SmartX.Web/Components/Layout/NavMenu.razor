@@ -9,61 +9,65 @@
                  Match="NavLinkMatch.All"
                  class="brand-link"
                  aria-label="Smart-X dashboard">
-            <span class="brand-mark">S</span>
+            <span class="brand-mark" aria-hidden="true">S</span>
+
             <span class="brand-copy">
                 <strong>SMART-X</strong>
-                <small>IoT MESH ECOSYSTEM</small>
+                <small>IoT Gateway Ecosystem</small>
             </span>
         </NavLink>
     </div>
 
-    <div class="nav-links">
-        <NavLink href="/"
-                 Match="NavLinkMatch.All"
-                 class="nav-link">
-            <span class="nav-icon" aria-hidden="true">⌂</span>
-            <span>Overview</span>
-        </NavLink>
+    <div class="nav-section">
+        <h2 class="nav-section-title">MAIN MENU</h2>
 
-        <section class="@CommandPillarClass"
-                 aria-label="Command Management">
-            <div class="pillar-heading">
-                <span class="nav-icon" aria-hidden="true">⌘</span>
-                <span>Command Management</span>
-
-                @if (IsCommandPillarActive)
-                {
-                    <span class="pillar-indicator"
-                          aria-label="Active section"></span>
-                }
-            </div>
-
-            <div class="pillar-links">
-                <NavLink href="/commands"
-                         Match="NavLinkMatch.All"
-                         class="nav-link nav-child">
-                    <span>Command Stream</span>
-                    <span class="nav-pill">PART 2</span>
-                </NavLink>
-
-                <NavLink href="/command-history"
-                         Match="NavLinkMatch.All"
-                         class="nav-link nav-child">
-                    <span>Command History</span>
-                </NavLink>
-
-                <NavLink href="/collection-diagnostics"
-                         Match="NavLinkMatch.All"
-                         class="nav-link nav-child">
-                    <span>Collection Diagnostics</span>
-                </NavLink>
-            </div>
-        </section>
+        <div class="pillar-links">
+            <NavLink href="/"
+                     Match="NavLinkMatch.All"
+                     class="nav-link">
+                <span class="nav-icon" aria-hidden="true">⌂</span>
+                <span class="nav-link-label">Overview</span>
+            </NavLink>
+        </div>
     </div>
+
+    <section class="@CommandPillarClass"
+             aria-label="Command Management">
+        <h2 class="nav-section-title">COMMAND MANAGEMENT</h2>
+
+        <div class="pillar-links">
+            <NavLink href="/commands"
+                     Match="NavLinkMatch.All"
+                     class="nav-link">
+                <span class="nav-icon" aria-hidden="true">↗</span>
+                <span class="nav-link-label">Command Stream</span>
+            </NavLink>
+
+            <NavLink href="/command-history"
+                     Match="NavLinkMatch.All"
+                     class="nav-link">
+                <span class="nav-icon" aria-hidden="true">◷</span>
+                <span class="nav-link-label">Command History</span>
+            </NavLink>
+
+            <NavLink href="/collection-diagnostics"
+                     Match="NavLinkMatch.All"
+                     class="nav-link">
+                <span class="nav-icon" aria-hidden="true">⊞</span>
+                <span class="nav-link-label">Collection Diagnostics</span>
+            </NavLink>
+        </div>
+    </section>
+
+    <div class="nav-spacer"></div>
 
     <div class="nav-footer">
         <span class="connection-dot" aria-hidden="true"></span>
-        <span>Application online</span>
+
+        <span class="nav-footer-copy">
+            <strong>Application status</strong>
+            <small>Online</small>
+        </span>
     </div>
 </nav>
 
@@ -86,14 +90,13 @@
 
     private string GetCurrentPath()
     {
-        var relativePath =
-            Navigation.ToBaseRelativePath(Navigation.Uri);
+        var relativePath = Navigation.ToBaseRelativePath(
+            Navigation.Uri);
 
-        var path = relativePath
+        return relativePath
             .Split('?', '#')[0]
-            .Trim('/');
-
-        return path.ToLowerInvariant();
+            .Trim('/')
+            .ToLowerInvariant();
     }
 
     private void HandleLocationChanged(
