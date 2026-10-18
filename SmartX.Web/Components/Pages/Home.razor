@@ -1,1273 +1,486 @@
 ﻿@page "/sensor-dashboard"
-
 @using System.Net.Http.Json
 @using System.Text.Json
-@using SmartX.Shared.Models
 @using SmartX.Web.Services
-@using Microsoft.AspNetCore.Components.Routing
-
+@implements IAsyncDisposable
 @inject IHttpClientFactory HttpClientFactory
 @inject RecommendationEngine RecommendationEngine
-@implements IAsyncDisposable
+@inject ILogger<Home> Logger
 
-<div class="sx-page">
+<PageTitle>Smart-X Predictive Dashboard</PageTitle>
 
-    <section class="sx-hero">
-        <div class="sx-hero-content">
-            <div class="sx-eyebrow">
-                <span class="sx-eyebrow-dot"></span>
-                SMART-X / EDGE OPERATIONS
-            </div>
-
-            <h1>Data Ingestion <span>Gateway</span></h1>
-
-            <p class="sx-hero-description">
-                Centralised telemetry monitoring, sensor management,
-                predictive operational intelligence, and incident prioritisation.
-            </p>
-
-            <div class="sx-hero-meta">
-                <div class="sx-status-pill">
-                    <span class="sx-status-dot @(GatewayOnline ? "online" : "offline")"></span>
-                    <span>@GatewayStatus</span>
-                </div>
-                <span class="sx-divider"></span>
-                <span class="sx-meta-text">Edge Gateway Interface</span>
-            </div>
+<div class="container-fluid py-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+        <div>
+            <h1 class="h3 mb-1">Smart-X Predictive Dashboard</h1>
+            <p class="text-muted mb-0">Real-time telemetry and predictive insights</p>
         </div>
 
-        <div class="sx-hero-visual" aria-hidden="true">
-            <div class="sx-orbit sx-orbit-one"></div>
-            <div class="sx-orbit sx-orbit-two"></div>
-            <div class="sx-core"><span>SX</span></div>
-            <div class="sx-signal sx-signal-one"></div>
-            <div class="sx-signal sx-signal-two"></div>
-            <div class="sx-signal sx-signal-three"></div>
-        </div>
-    </section>
-
-    <section class="sx-control-panel">
-        <div class="sx-section-heading">
-            <div>
-                <span class="sx-section-kicker">01 / SYSTEM STATUS</span>
-                <h2>Gateway Control Centre</h2>
-                <p>Monitor the connection between the Smart-X client and ingestion API.</p>
-            </div>
-
-            <button class="sx-button sx-button-primary"
-                    @onclick="CheckGatewayAsync"
-                    disabled="@IsChecking">
-                <span class="sx-button-icon">↻</span>
-                @(IsChecking ? "Checking Gateway..." : "Refresh Gateway")
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge @GatewayBadgeClass">@GatewayStatus</span>
+            <span class="badge @RefreshBadgeClass">@RefreshStatus</span>
+            <button class="btn btn-primary"
+                    @onclick="RefreshNowAsync"
+                    disabled="@IsRefreshing">
+                @(IsRefreshing ? "Refreshing..." : "Refresh now")
             </button>
         </div>
+    </div>
 
-        @if (!string.IsNullOrWhiteSpace(ConnectionMessage))
-        {
-            <div class="sx-feedback @(GatewayOnline ? "success" : "error")"
-                 role="status" aria-live="polite">
-                <span class="sx-feedback-icon">@(GatewayOnline ? "✓" : "!")</span>
-                <span>@ConnectionMessage</span>
-            </div>
-        }
-    </section>
-
-    <section class="sx-section">
-        <div class="sx-section-heading">
-            <div>
-                <span class="sx-section-kicker">02 / PREDICTIVE INTELLIGENCE</span>
-                <h2>Predictive Action and Suggestion Engine</h2>
-                <p>
-                    Analyses recent sensor readings, detects abnormal values and
-                    emerging trends, and recommends proactive operational actions.
-                </p>
-            </div>
-
-            <div class="sx-live-label" role="status" aria-live="polite">
-                <span></span>
-                @(IsLoadingRecommendations
-                    ? "ANALYSING"
-                    : RecommendationLoadFailed
-                        ? "DATA STALE"
-                        : "LIVE ANALYSIS")
-            </div>
-        </div>
-
-        <div class="sx-kpi-grid">
-            <article class="sx-kpi-card">
-                <span class="sx-kpi-label">SENSORS ANALYSED</span>
-                <strong>@SensorsAnalysed</strong>
-                <span class="sx-kpi-description">Sensors with retrieved telemetry</span>
-            </article>
-
-            <article class="sx-kpi-card">
-                <span class="sx-kpi-label">READINGS PROCESSED</span>
-                <strong>@ReadingsAnalysed</strong>
-                <span class="sx-kpi-description">Timestamped observations</span>
-            </article>
-
-            <article class="sx-kpi-card sx-kpi-critical">
-                <span class="sx-kpi-label">CRITICAL ACTIONS</span>
-                <strong>@CriticalRecommendationCount</strong>
-                <span class="sx-kpi-description">Immediate intervention suggested</span>
-            </article>
-
-            <article class="sx-kpi-card sx-kpi-warning">
-                <span class="sx-kpi-label">WARNINGS</span>
-                <strong>@WarningRecommendationCount</strong>
-                <span class="sx-kpi-description">Risks requiring investigation</span>
-            </article>
-        </div>
-
-        @if (CriticalRecommendationCount > 0)
-        {
-            <div class="sx-alert sx-alert-critical" role="alert" aria-live="assertive">
-                <div class="sx-alert-icon">!</div>
-                <div>
-                    <strong>Critical predictive action required</strong>
-                    <p>
-                        @CriticalRecommendationCount critical recommendation(s)
-                        require immediate operator review.
-                    </p>
-                    <span class="sx-card-subtext">
-                        @if (LastTelemetryAnalysisUtc.HasValue)
-                        {
-                            <text>Last successful analysis: @LastTelemetryAnalysisUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss").</text>
-                        }
-                        @if (RecommendationLoadFailed)
-                        {
-                            <text> The latest refresh failed; this alert reflects the last successful analysis.</text>
-                        }
-                    </span>
-                </div>
-            </div>
-        }
-        else if (WarningRecommendationCount > 0)
-        {
-            <div class="sx-alert sx-alert-warning" role="status" aria-live="polite">
-                <div class="sx-alert-icon">!</div>
-                <div>
-                    <strong>Predictive warnings detected</strong>
-                    <p>
-                        @WarningRecommendationCount warning recommendation(s)
-                        need investigation and monitoring.
-                    </p>
-                </div>
-            </div>
-        }
-
-        @if (RecommendationLoadFailed)
-        {
-            <div class="sx-feedback error" role="alert" aria-live="assertive">
-                <span class="sx-feedback-icon">!</span>
-                <span>
-                    @RecommendationMessage
-                    @if (LastTelemetryAnalysisUtc.HasValue)
-                    {
-                        <text>
-                            Showing the last successfully generated recommendations from
-                            @LastTelemetryAnalysisUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss").
-                        </text>
-                    }
-                    else
-                    {
-                        <text> No successful analysis is available yet.</text>
-                    }
-                </span>
-            </div>
-        }
-        else if (!string.IsNullOrWhiteSpace(RecommendationMessage))
-        {
-            <div class="sx-feedback success" role="status" aria-live="polite">
-                <span class="sx-feedback-icon">i</span>
-                <span>@RecommendationMessage</span>
-            </div>
-        }
-
-        @if (IsLoadingRecommendations && Recommendations.Count == 0)
-        {
-            <div class="sx-loading-card">
-                <div class="sx-spinner"></div>
-                <div>
-                    <strong>Analysing telemetry</strong>
-                    <span>Evaluating sensor readings and operational risk...</span>
-                </div>
-            </div>
-        }
-        else if (Recommendations.Count == 0 && !RecommendationLoadFailed)
-        {
-            <div class="sx-empty-state">
-                <div class="sx-empty-icon">✓</div>
-                <strong>No predictive actions identified</strong>
-                <span>
-                    No current recommendations were generated from the available
-                    telemetry and operational state.
-                </span>
-            </div>
-        }
-        else if (Recommendations.Count > 0)
-        {
-            <div class="sx-issue-grid">
-                @foreach (var recommendation in Recommendations)
-                {
-                    <article class="sx-issue-card" @key="RecommendationKey(recommendation)">
-                        <div class="sx-issue-top">
-                            <span class="sx-severity @GetRecommendationSeverityClass(recommendation.Severity)">
-                                @recommendation.Severity
-                            </span>
-
-                            <span class="sx-issue-status">
-                                @(recommendation.DeviceId.HasValue
-                                    ? "DEVICE-SPECIFIC"
-                                    : "SYSTEM-WIDE")
-                            </span>
-                        </div>
-
-                        <h3>@recommendation.Title</h3>
-                        <p>@recommendation.Description</p>
-
-                        @if (recommendation.DeviceId.HasValue)
-                        {
-                            <div class="sx-issue-meta">
-                                <span>SENSOR ID</span>
-                                <strong>@recommendation.DeviceId.Value</strong>
-                            </div>
-                        }
-
-                        <div class="sx-issue-meta">
-                            <span>RECOMMENDED ACTION</span>
-                            <strong>@GetRecommendedAction(recommendation)</strong>
-                        </div>
-
-                        @if (LastTelemetryAnalysisUtc.HasValue)
-                        {
-                            <div class="sx-issue-meta">
-                                <span>LAST EVALUATED</span>
-                                <strong>@LastTelemetryAnalysisUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</strong>
-                            </div>
-                        }
-                    </article>
-                }
-            </div>
-        }
-
-        @if (LastTelemetryAnalysisUtc.HasValue)
-        {
-            <p class="sx-card-subtext">
-                Last successful analysis:
-                @LastTelemetryAnalysisUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
-                · Automatic refresh every 10 seconds
-                @if (RecommendationLoadFailed)
-                {
-                    <span> · Displayed results may be stale</span>
-                }
-            </p>
-        }
-    </section>
-
-    <section class="sx-section">
-        <div class="sx-section-heading">
-            <div>
-                <span class="sx-section-kicker">03 / INTELLIGENT MONITORING</span>
-                <h2>Incident Engagement Centre</h2>
-                <p>
-                    Dynamic attention management prioritises operational incidents
-                    according to severity and current system state.
-                </p>
-            </div>
-            <div class="sx-live-label"><span></span>LIVE MONITORING</div>
-        </div>
-
-        @if (IsLoadingEngagement && EngagementSnapshot is null)
-        {
-            <div class="sx-loading-card">
-                <div class="sx-spinner"></div>
-                <div>
-                    <strong>Loading engagement intelligence</strong>
-                    <span>Retrieving current gateway incident state...</span>
-                </div>
-            </div>
-        }
-        else if (EngagementSnapshot is not null)
-        {
-            <div class="sx-attention-card">
-                <div>
-                    <span class="sx-card-kicker">CURRENT ATTENTION LEVEL</span>
-                    <strong class="sx-attention-value">@EngagementSnapshot.AttentionLevel</strong>
-                    <span class="sx-card-subtext">
-                        Snapshot generated @EngagementSnapshot.GeneratedAtUtc.ToLocalTime()
-                    </span>
-                </div>
-                <div class="sx-attention-indicator"><span></span></div>
-            </div>
-
-            <div class="sx-kpi-grid">
-                <article class="sx-kpi-card">
-                    <span class="sx-kpi-label">TOTAL ISSUES</span>
-                    <strong>@EngagementSnapshot.TotalIssues</strong>
-                    <span class="sx-kpi-description">All recorded incidents</span>
-                </article>
-
-                <article class="sx-kpi-card">
-                    <span class="sx-kpi-label">OPEN</span>
-                    <strong>@EngagementSnapshot.OpenIssues</strong>
-                    <span class="sx-kpi-description">Currently requiring monitoring</span>
-                </article>
-
-                <article class="sx-kpi-card sx-kpi-critical">
-                    <span class="sx-kpi-label">CRITICAL</span>
-                    <strong>@EngagementSnapshot.CriticalOpenIssues</strong>
-                    <span class="sx-kpi-description">Immediate attention required</span>
-                </article>
-
-                <article class="sx-kpi-card sx-kpi-warning">
-                    <span class="sx-kpi-label">WARNINGS</span>
-                    <strong>@EngagementSnapshot.WarningOpenIssues</strong>
-                    <span class="sx-kpi-description">Under active observation</span>
-                </article>
-
-                <article class="sx-kpi-card">
-                    <span class="sx-kpi-label">INFORMATION</span>
-                    <strong>@EngagementSnapshot.InformationalOpenIssues</strong>
-                    <span class="sx-kpi-description">Informational events</span>
-                </article>
-
-                <article class="sx-kpi-card sx-kpi-resolved">
-                    <span class="sx-kpi-label">RESOLVED</span>
-                    <strong>@EngagementSnapshot.ResolvedIssues</strong>
-                    <span class="sx-kpi-description">Successfully closed incidents</span>
-                </article>
-            </div>
-
-            @if (EngagementSnapshot.CriticalOpenIssues > 0)
-            {
-                <div class="sx-alert sx-alert-critical" role="alert" aria-live="assertive">
-                    <div class="sx-alert-icon">!</div>
-                    <div>
-                        <strong>Immediate attention required</strong>
-                        <p>
-                            @EngagementSnapshot.CriticalOpenIssues critical
-                            @(EngagementSnapshot.CriticalOpenIssues == 1
-                                ? "incident requires"
-                                : "incidents require") immediate attention.
-                        </p>
-                    </div>
-                </div>
-            }
-            else if (EngagementSnapshot.WarningOpenIssues > 0)
-            {
-                <div class="sx-alert sx-alert-warning" role="status" aria-live="polite">
-                    <div class="sx-alert-icon">!</div>
-                    <div>
-                        <strong>Attention required</strong>
-                        <p>
-                            @EngagementSnapshot.WarningOpenIssues warning
-                            @(EngagementSnapshot.WarningOpenIssues == 1
-                                ? "incident remains"
-                                : "incidents remain") under observation.
-                        </p>
-                    </div>
-                </div>
-            }
-            else if (EngagementSnapshot.OpenIssues > 0)
-            {
-                <div class="sx-alert sx-alert-info" role="status" aria-live="polite">
-                    <div class="sx-alert-icon">i</div>
-                    <div>
-                        <strong>Monitoring active</strong>
-                        <p>@EngagementSnapshot.OpenIssues open incident(s) currently being monitored.</p>
-                    </div>
-                </div>
-            }
-            else
-            {
-                <div class="sx-alert sx-alert-success" role="status" aria-live="polite">
-                    <div class="sx-alert-icon">✓</div>
-                    <div>
-                        <strong>All systems clear</strong>
-                        <p>No active incidents currently require attention.</p>
-                    </div>
-                </div>
-            }
-        }
-
-        @if (EngagementLoadFailed)
-        {
-            <div class="sx-feedback error" role="alert" aria-live="assertive">
-                <span class="sx-feedback-icon">!</span>
-                <span>
-                    @EngagementErrorMessage
-                    @if (EngagementSnapshot is not null)
-                    {
-                        <text> The last successfully loaded incident snapshot is still displayed.</text>
-                    }
-                </span>
-            </div>
-        }
-    </section>
-
-    @if (EngagementSnapshot is not null)
+    @if (!string.IsNullOrWhiteSpace(PageError))
     {
-        <section class="sx-section">
-            <div class="sx-section-heading">
-                <div>
-                    <span class="sx-section-kicker">04 / PRIORITY ENGINE</span>
-                    <h2>Priority Attention Queue</h2>
-                    <p>Highest-risk incidents are surfaced first.</p>
-                </div>
-            </div>
-
-            @if (EngagementSnapshot.PriorityIssues is null ||
-                 EngagementSnapshot.PriorityIssues.Count == 0)
+        <div class="alert alert-warning" role="alert">
+            <strong>Dashboard update issue:</strong> @PageError
+            @if (LastSuccessfulRefresh.HasValue)
             {
-                <div class="sx-empty-state">
-                    <div class="sx-empty-icon">✓</div>
-                    <strong>No active incidents</strong>
-                    <span>The priority queue is currently clear.</span>
+                <div class="small mt-1">
+                    Last successful refresh:
+                    @LastSuccessfulRefresh.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
                 </div>
             }
-            else
-            {
-                <div class="sx-issue-grid">
-                    @foreach (var issue in EngagementSnapshot.PriorityIssues)
-                    {
-                        <article class="sx-issue-card" @key="issue.Id">
-                            <div class="sx-issue-top">
-                                <span class="sx-severity sx-severity-@GetSeverityCss(issue.Severity)">
-                                    @issue.Severity
-                                </span>
-                                <span class="sx-issue-status">@issue.Status</span>
-                            </div>
-
-                            <h3>@issue.Title</h3>
-                            <p>@issue.Description</p>
-
-                            <div class="sx-issue-meta">
-                                <span>REPORTED</span>
-                                <strong>@issue.ReportedAtUtc.ToLocalTime()</strong>
-                            </div>
-
-                            @if (IsOpen(issue.Status))
-                            {
-                                <button class="sx-button sx-button-danger"
-                                        @onclick="() => ResolveIssueAsync(issue.Id)"
-                                        disabled="@IsResolvingIssue">
-                                    @(IsResolvingIssue ? "Resolving..." : "Resolve Incident")
-                                </button>
-                            }
-                        </article>
-                    }
-                </div>
-            }
-        </section>
+            <button class="btn btn-sm btn-outline-dark mt-2"
+                    @onclick="RefreshNowAsync"
+                    disabled="@IsRefreshing">
+                Retry
+            </button>
+        </div>
     }
 
-    <section class="sx-section">
-        <div class="sx-section-heading">
-            <div>
-                <span class="sx-section-kicker">05 / INVESTIGATION</span>
-                <h2>Interactive Incident Triage</h2>
-                <p>Search, filter, and sort incidents during operational investigation.</p>
-            </div>
-        </div>
-
-        <div class="sx-filter-panel">
-            <div class="sx-field">
-                <label for="issueSearch">Search incidents</label>
-                <input id="issueSearch" class="sx-input"
-                       @bind="SearchText" @bind:event="oninput"
-                       placeholder="Search title or description..." />
-            </div>
-
-            <div class="sx-field">
-                <label for="severityFilter">Severity</label>
-                <select id="severityFilter" class="sx-input" @bind="SelectedSeverity">
-                    <option value="All">All severities</option>
-                    <option value="Critical">Critical</option>
-                    <option value="Warning">Warning</option>
-                    <option value="Info">Info</option>
-                </select>
-            </div>
-
-            <div class="sx-field">
-                <label for="statusFilter">Status</label>
-                <select id="statusFilter" class="sx-input" @bind="SelectedStatus">
-                    <option value="All">All statuses</option>
-                    <option value="Open">Open</option>
-                    <option value="Resolved">Resolved</option>
-                </select>
-            </div>
-
-            <div class="sx-field">
-                <label for="sortOrder">Sort by</label>
-                <select id="sortOrder" class="sx-input" @bind="SelectedSort">
-                    <option value="Priority">Highest priority</option>
-                    <option value="Newest">Newest first</option>
-                    <option value="Oldest">Oldest first</option>
-                </select>
-            </div>
-        </div>
-
-        <div class="sx-results-summary">
-            <span class="sx-results-count">@FilteredIssues.Count()</span>
-            <span>of @Issues.Count incidents displayed</span>
-        </div>
-    </section>
-
-    <section class="sx-section">
-        <div class="sx-section-heading">
-            <div>
-                <span class="sx-section-kicker">06 / OPERATOR INPUT</span>
-                <h2>Report an Issue</h2>
-                <p>Create an operational incident in the engagement system.</p>
-            </div>
-        </div>
-
-        <div class="sx-form-panel">
-            <div class="sx-field sx-field-wide">
-                <label for="issueTitle">Issue title</label>
-                <input id="issueTitle" class="sx-input"
-                       @bind="NewIssueTitle"
-                       placeholder="e.g. Soil moisture sensor reporting abnormal values" />
-            </div>
-
-            <div class="sx-field sx-field-wide">
-                <label for="issueDescription">Description</label>
-                <textarea id="issueDescription" class="sx-input sx-textarea"
-                          @bind="NewIssueDescription"
-                          placeholder="Describe the observed behaviour or operational concern"></textarea>
-            </div>
-
-            <div class="sx-field">
-                <label for="issueSeverity">Severity</label>
-                <select id="issueSeverity" class="sx-input" @bind="NewIssueSeverity">
-                    <option value="Info">Information</option>
-                    <option value="Warning">Warning</option>
-                    <option value="Critical">Critical</option>
-                </select>
-            </div>
-
-            <div class="sx-form-action">
-                <button class="sx-button sx-button-primary"
-                        @onclick="ReportIssueAsync" disabled="@IsReportingIssue">
-                    @(IsReportingIssue ? "Reporting..." : "Report Incident")
-                </button>
-            </div>
-        </div>
-    </section>
-
-    <section class="sx-section">
-        <div class="sx-section-heading">
-            <div>
-                <span class="sx-section-kicker">07 / LIVE OPERATIONS</span>
-                <h2>Live Incident Board</h2>
-                <p>Current incident activity across the Smart-X environment.</p>
-            </div>
-            <div class="sx-live-label"><span></span>AUTO REFRESH / 10 SEC</div>
-        </div>
-
-        @if (IsLoadingIssues)
-        {
-            <div class="sx-loading-card">
-                <div class="sx-spinner"></div>
-                <div>
-                    <strong>Refreshing incident activity</strong>
-                    <span>Synchronising with the gateway...</span>
-                </div>
-            </div>
-        }
-        else if (!FilteredIssues.Any())
-        {
-            <div class="sx-empty-state">
-                <div class="sx-empty-icon">—</div>
-                <strong>No matching incidents</strong>
-                <span>Try adjusting the current search or filters.</span>
-            </div>
-        }
-        else
-        {
-            <div class="sx-issue-grid">
-                @foreach (var issue in FilteredIssues)
-                {
-                    <article class="sx-issue-card" @key="issue.Id">
-                        <div class="sx-issue-top">
-                            <span class="sx-severity sx-severity-@GetSeverityCss(issue.Severity)">
-                                @issue.Severity
-                            </span>
-                            <span class="sx-issue-status">@issue.Status</span>
-                        </div>
-
-                        <h3>@issue.Title</h3>
-                        <p>@issue.Description</p>
-
-                        <div class="sx-issue-meta">
-                            <span>REPORTED</span>
-                            <strong>@issue.ReportedAtUtc.ToLocalTime()</strong>
-                        </div>
-
-                        @if (IsOpen(issue.Status))
-                        {
-                            <button class="sx-button sx-button-danger"
-                                    @onclick="() => ResolveIssueAsync(issue.Id)"
-                                    disabled="@IsResolvingIssue">
-                                @(IsResolvingIssue ? "Resolving..." : "Resolve Incident")
-                            </button>
-                        }
-                        else
-                        {
-                            <span class="sx-resolved-badge">✓ Resolved</span>
-                        }
-                    </article>
-                }
-            </div>
-        }
-    </section>
-
-    @if (EngagementSnapshot is not null)
+    @if (!string.IsNullOrWhiteSpace(RecommendationMessage))
     {
-        <section class="sx-section">
-            <div class="sx-section-heading">
-                <div>
-                    <span class="sx-section-kicker">08 / AUDIT ACTIVITY</span>
-                    <h2>Recent Engagement Activity</h2>
-                    <p>Recent events provide context for changing gateway conditions.</p>
-                </div>
-            </div>
-
-            @if (EngagementSnapshot.RecentActivity is null ||
-                 EngagementSnapshot.RecentActivity.Count == 0)
-            {
-                <div class="sx-empty-state">
-                    <strong>No recent activity</strong>
-                    <span>New engagement events will appear here.</span>
-                </div>
-            }
-            else
-            {
-                <div class="sx-timeline">
-                    @foreach (var issue in EngagementSnapshot.RecentActivity)
-                    {
-                        <article class="sx-timeline-item" @key="issue.Id">
-                            <div class="sx-timeline-marker"></div>
-                            <div class="sx-timeline-content">
-                                <div class="sx-timeline-heading">
-                                    <h3>@issue.Title</h3>
-                                    <span class="sx-severity sx-severity-@GetSeverityCss(issue.Severity)">
-                                        @issue.Severity
-                                    </span>
-                                </div>
-
-                                <div class="sx-timeline-meta">
-                                    <span>@issue.Status</span>
-                                    <span>•</span>
-                                    <span>@issue.ReportedAtUtc.ToLocalTime()</span>
-                                </div>
-                            </div>
-                        </article>
-                    }
-                </div>
-            }
-        </section>
+        <div class="alert alert-info" role="status">@RecommendationMessage</div>
     }
 
-    @if (!string.IsNullOrWhiteSpace(DashboardMessage))
-    {
-        <div class="sx-feedback @(DashboardMessageCssClass == "connection-success" ? "success" : "error")"
-             role="status" aria-live="polite">
-            <span class="sx-feedback-icon">
-                @(DashboardMessageCssClass == "connection-success" ? "✓" : "!")
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted">Telemetry readings</div>
+                    <div class="display-6">@TelemetryReadings.Count</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted">Devices reporting</div>
+                    <div class="display-6">@DeviceCount</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted">Critical recommendations</div>
+                    <div class="display-6 text-danger">@CriticalCount</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-sm-6 col-xl-3">
+            <div class="card shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-muted">Total recommendations</div>
+                    <div class="display-6">@Recommendations.Count</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <section class="card shadow-sm mb-4">
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <h2 class="h5 mb-0">Predictive recommendations</h2>
+            <span class="small text-muted">
+                Updated @(LastSuccessfulRefresh?.ToLocalTime().ToString("HH:mm:ss") ?? "Not yet")
             </span>
-            <span>@DashboardMessage</span>
-        </div>
-    }
-
-    <section class="sx-section sx-architecture-section">
-        <div class="sx-section-heading">
-            <div>
-                <span class="sx-section-kicker">SMART-X / ARCHITECTURE</span>
-                <h2>System Capabilities</h2>
-                <p>The Smart-X platform integrates telemetry, command execution, and mesh routing.</p>
-            </div>
         </div>
 
-        <div class="sx-architecture-grid">
-            <article class="sx-feature-card sx-feature-active">
-                <div class="sx-feature-number">01</div>
-                <div class="sx-feature-icon">SD</div>
-                <span class="sx-feature-status">ACTIVE</span>
-                <h3>Sensor Data Ingestion</h3>
-                <p>Register sensors, submit telemetry, validate values, and monitor gateway activity.</p>
-                <NavLink href="/" Match="NavLinkMatch.All" class="sx-feature-link">
-                    Open Sensor Dashboard →
-                </NavLink>
-            </article>
+        <div class="card-body">
+            @if (IsInitialLoad)
+            {
+                <div class="py-3">
+                    <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                    Loading telemetry and generating recommendations...
+                </div>
+            }
+            else if (Recommendations.Count == 0)
+            {
+                <p class="text-muted mb-0">
+                    No actionable recommendations were detected in the available telemetry and operational state.
+                </p>
+            }
+            else
+            {
+                <div class="row g-3">
+                    @foreach (var recommendation in Recommendations)
+                    {
+                        <div class="col-12 col-lg-6"
+                             @key="RecommendationKey(recommendation)">
+                            <article class="card h-100 border-start border-4 @SeverityBorder(recommendation.Severity)">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                                        <h3 class="h6 mb-0">@recommendation.Title</h3>
+                                        <span class="badge @SeverityBadge(recommendation.Severity)">
+                                            @recommendation.Severity
+                                        </span>
+                                    </div>
 
-            <article class="sx-feature-card">
-                <div class="sx-feature-number">02</div>
-                <div class="sx-feature-icon">CS</div>
-                <span class="sx-feature-status">ACTIVE</span>
-                <h3>Command Stream &amp; History</h3>
-                <p>Manage commands, FIFO processing, priority execution, undo operations, and audit history.</p>
-                <NavLink href="/commands" Match="NavLinkMatch.Prefix" class="sx-feature-link">
-                    Open Command Centre →
-                </NavLink>
-            </article>
+                                    <p class="mb-2">@recommendation.Description</p>
 
-            <article class="sx-feature-card sx-feature-disabled-card">
-                <div class="sx-feature-number">03</div>
-                <div class="sx-feature-icon">NT</div>
-                <span class="sx-feature-status disabled">FINAL PoE</span>
-                <h3>Network Topology &amp; Mesh Routing</h3>
-                <p>Mesh topology visualisation and intelligent routing capabilities will complete the ecosystem.</p>
-                <span class="sx-feature-disabled">Coming Later</span>
-            </article>
+                                    @if (recommendation.DeviceId.HasValue &&
+                                         recommendation.DeviceId.Value != Guid.Empty)
+                                    {
+                                        <div class="small text-muted">
+                                            Device: @recommendation.DeviceId.Value
+                                        </div>
+                                    }
+                                </div>
+                            </article>
+                        </div>
+                    }
+                </div>
+            }
         </div>
     </section>
+
+    <section class="card shadow-sm mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <h2 class="h5 mb-0">Recent telemetry</h2>
+            <span class="badge text-bg-secondary">@TelemetryReadings.Count readings</span>
+        </div>
+
+        <div class="card-body p-0">
+            @if (TelemetryReadings.Count == 0)
+            {
+                <p class="text-muted p-3 mb-0">No telemetry readings available.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Device</th>
+                                <th>Metric</th>
+                                <th>Value</th>
+                                <th>Warning</th>
+                                <th>Critical</th>
+                                <th>Observed</th>
+                                <th>Freshness</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var reading in TelemetryReadings.Take(100))
+                            {
+                                <tr @key="TelemetryKey(reading)">
+                                    <td>@reading.SensorId.ToString("N")[..8]</td>
+                                    <td>@reading.MetricName</td>
+                                    <td>@reading.Value.ToString("0.##") @reading.Unit</td>
+                                    <td>@FormatThreshold(reading.WarningThreshold)</td>
+                                    <td>@FormatThreshold(reading.CriticalThreshold)</td>
+                                    <td class="text-nowrap">
+                                        @reading.ObservedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+                                    </td>
+                                    <td>
+                                        <span class="badge @FreshnessBadge(reading.ObservedAt)">
+                                            @FreshnessText(reading.ObservedAt)
+                                        </span>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </section>
+
+    <div class="d-flex flex-wrap justify-content-between gap-2 small text-muted">
+        <span>Automatic refresh: every @((int)RefreshInterval.TotalSeconds) seconds</span>
+        <span>Last attempt: @(LastRefreshAttempt?.ToLocalTime().ToString("HH:mm:ss") ?? "Not yet")</span>
+    </div>
 </div>
 
 @code {
-    private bool IsChecking;
-    private bool GatewayOnline;
-    private string GatewayStatus = "Gateway Status Unknown";
-    private string? ConnectionMessage;
+    private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan StaleThreshold = TimeSpan.FromMinutes(15);
 
-    private DashboardEngagementSnapshot? EngagementSnapshot;
-    private List<UserIssue> Issues = new();
-
-    private bool IsLoadingEngagement;
-    private bool IsLoadingIssues;
-    private bool IsReportingIssue;
-    private bool IsResolvingIssue;
-    private bool EngagementLoadFailed;
-    private string? EngagementErrorMessage;
-
-    private string? DashboardMessage;
-    private string DashboardMessageCssClass = string.Empty;
-
-    private string SearchText = string.Empty;
-    private string SelectedSeverity = "All";
-    private string SelectedStatus = "All";
-    private string SelectedSort = "Priority";
-
-    private string NewIssueTitle = string.Empty;
-    private string NewIssueDescription = string.Empty;
-    private string NewIssueSeverity = "Info";
-
-    private List<SmartXRecommendation> Recommendations = new();
-    private bool IsLoadingRecommendations;
-    private bool RecommendationLoadFailed;
-    private string? RecommendationMessage;
-    private int SensorsAnalysed;
-    private int ReadingsAnalysed;
-    private DateTimeOffset? LastTelemetryAnalysisUtc;
-
-    private PeriodicTimer? _refreshTimer;
-    private CancellationTokenSource? _refreshCancellation;
-    private Task? _refreshTask;
-
+    private readonly CancellationTokenSource _disposeCts = new();
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
-    private readonly SemaphoreSlim _recommendationLock = new(1, 1);
 
-    private IEnumerable<UserIssue> FilteredIssues
+    private PeriodicTimer? _timer;
+    private Task? _refreshLoop;
+    private bool _disposed;
+
+    private List<TelemetryHistoryDto> TelemetryReadings { get; set; } = new();
+    private List<SmartXRecommendation> Recommendations { get; set; } = new();
+
+    private bool IsInitialLoad { get; set; } = true;
+    private bool IsRefreshing { get; set; }
+
+    private string GatewayStatus { get; set; } = "Checking";
+    private string RefreshStatus { get; set; } = "Starting";
+    private string? PageError { get; set; }
+    private string? RecommendationMessage { get; set; }
+
+    private DateTimeOffset? LastSuccessfulRefresh { get; set; }
+    private DateTimeOffset? LastRefreshAttempt { get; set; }
+
+    private int DeviceCount => TelemetryReadings
+        .Where(x => x.SensorId != Guid.Empty)
+        .Select(x => x.SensorId)
+        .Distinct()
+        .Count();
+
+    private int CriticalCount => Recommendations.Count(
+        x => x.Severity == RecommendationSeverity.Critical);
+
+    private string GatewayBadgeClass => GatewayStatus switch
     {
-        get
-        {
-            IEnumerable<UserIssue> result = Issues;
+        "Online" => "text-bg-success",
+        "Offline" => "text-bg-danger",
+        _ => "text-bg-secondary"
+    };
 
-            if (!string.IsNullOrWhiteSpace(SearchText))
-            {
-                var search = SearchText.Trim();
-
-                result = result.Where(issue =>
-                    (issue.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                    (issue.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
-            }
-
-            if (!SelectedSeverity.Equals("All", StringComparison.OrdinalIgnoreCase))
-            {
-                result = result.Where(issue =>
-                    string.Equals(issue.Severity, SelectedSeverity, StringComparison.OrdinalIgnoreCase));
-            }
-
-            if (!SelectedStatus.Equals("All", StringComparison.OrdinalIgnoreCase))
-            {
-                result = result.Where(issue =>
-                    string.Equals(issue.Status, SelectedStatus, StringComparison.OrdinalIgnoreCase));
-            }
-
-            return SelectedSort switch
-            {
-                "Newest" => result.OrderByDescending(issue => issue.ReportedAtUtc),
-                "Oldest" => result.OrderBy(issue => issue.ReportedAtUtc),
-                _ => result
-                    .OrderByDescending(issue => GetSeverityPriority(issue.Severity))
-                    .ThenByDescending(issue => IsOpen(issue.Status))
-                    .ThenByDescending(issue => issue.ReportedAtUtc)
-            };
-        }
-    }
-
-    private int CriticalRecommendationCount =>
-        Recommendations.Count(item => item.Severity == RecommendationSeverity.Critical);
-
-    private int WarningRecommendationCount =>
-        Recommendations.Count(item => item.Severity == RecommendationSeverity.Warning);
+    private string RefreshBadgeClass => RefreshStatus switch
+    {
+        "Live" => "text-bg-success",
+        "Degraded" => "text-bg-warning",
+        _ => "text-bg-secondary"
+    };
 
     protected override async Task OnInitializedAsync()
     {
-        await CheckGatewayAsync();
-        StartLiveRefresh();
+        await RefreshNowAsync();
+
+        if (!_disposed)
+        {
+            _timer = new PeriodicTimer(RefreshInterval);
+            _refreshLoop = RunRefreshLoopAsync(_disposeCts.Token);
+        }
     }
 
-    private static bool IsOpen(string? status) =>
-        string.Equals(status, "Open", StringComparison.OrdinalIgnoreCase);
-
-    private static int GetSeverityPriority(string? severity) =>
-        severity?.ToLowerInvariant() switch
-        {
-            "critical" => 3,
-            "warning" => 2,
-            "info" => 1,
-            _ => 0
-        };
-
-    private static string GetSeverityCss(string? severity) =>
-        severity?.Trim().ToLowerInvariant() switch
-        {
-            "critical" => "critical",
-            "warning" => "warning",
-            "info" or "information" => "info",
-            _ => "info"
-        };
-
-    private static string GetRecommendationSeverityClass(RecommendationSeverity severity) =>
-        severity switch
-        {
-            RecommendationSeverity.Critical => "sx-severity-critical",
-            RecommendationSeverity.Warning => "sx-severity-warning",
-            _ => "sx-severity-info"
-        };
-
-    private static string RecommendationKey(SmartXRecommendation recommendation) =>
-        $"{recommendation.Title}|{recommendation.DeviceId}|{recommendation.Description}";
-
-    private static string GetRecommendedAction(SmartXRecommendation recommendation)
+    private async Task RunRefreshLoopAsync(CancellationToken cancellationToken)
     {
-        if (recommendation.Severity == RecommendationSeverity.Critical)
-            return "Investigate immediately";
-
-        if (recommendation.Severity == RecommendationSeverity.Warning)
-            return "Inspect and monitor";
-
-        return "Review during routine checks";
-    }
-
-    private async Task CheckGatewayAsync()
-    {
-        if (IsChecking)
-            return;
-
-        IsChecking = true;
-        ConnectionMessage = null;
-        GatewayStatus = "Checking Gateway...";
-
         try
         {
-            var client = HttpClientFactory.CreateClient("SmartXApi");
-
-            using var response = await client.GetAsync(
-                "api/telemetry/health",
-                HttpCompletionOption.ResponseHeadersRead);
-
-            GatewayOnline = response.IsSuccessStatusCode;
-
-            if (GatewayOnline)
+            while (_timer is not null &&
+                   await _timer.WaitForNextTickAsync(cancellationToken))
             {
-                GatewayStatus = "Gateway Online";
-                ConnectionMessage = "Successfully connected to the Smart-X API.";
-
-                await LoadEngagementAsync();
-                await LoadPredictiveRecommendationsAsync();
-            }
-            else
-            {
-                GatewayStatus = "Gateway Error";
-                ConnectionMessage = $"The Smart-X API returned HTTP {(int)response.StatusCode}.";
+                await InvokeAsync(RefreshNowAsync);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            GatewayOnline = false;
-            GatewayStatus = "Gateway Timeout";
-            ConnectionMessage = "The Smart-X API request timed out.";
+            // Expected during disposal.
         }
-        catch (HttpRequestException)
+        catch (ObjectDisposedException)
         {
-            GatewayOnline = false;
-            GatewayStatus = "Gateway Offline";
-            ConnectionMessage = "Unable to connect to the Smart-X API.";
+            // Expected when the timer is disposed.
         }
-        finally
+        catch (Exception ex)
         {
-            IsChecking = false;
-        }
-    }
+            Logger.LogError(ex, "Dashboard refresh loop failed.");
 
-    private async Task LoadEngagementAsync()
-    {
-        if (!await _refreshLock.WaitAsync(0))
-            return;
-
-        IsLoadingEngagement = true;
-        IsLoadingIssues = true;
-
-        try
-        {
-            var client = HttpClientFactory.CreateClient("SmartXApi");
-
-            var snapshot = await client.GetFromJsonAsync<DashboardEngagementSnapshot>(
-                "api/dashboard/engagement");
-
-            if (snapshot is null)
+            if (!_disposed)
             {
-                EngagementLoadFailed = true;
-                EngagementErrorMessage = "The engagement API returned an empty response.";
-                return;
-            }
-
-            EngagementSnapshot = snapshot;
-
-            var recentActivity = snapshot.RecentActivity ?? new List<UserIssue>();
-            var priorityIssues = snapshot.PriorityIssues ?? new List<UserIssue>();
-
-            Issues = recentActivity
-                .Concat(priorityIssues)
-                .GroupBy(issue => issue.Id)
-                .Select(group => group
-                    .OrderByDescending(issue => issue.ReportedAtUtc)
-                    .First())
-                .OrderByDescending(issue => issue.ReportedAtUtc)
-                .ToList();
-
-            EngagementLoadFailed = false;
-            EngagementErrorMessage = null;
-
-            if (DashboardMessageCssClass == "connection-error")
-            {
-                DashboardMessage = null;
-                DashboardMessageCssClass = string.Empty;
-            }
-        }
-        catch (HttpRequestException)
-        {
-            EngagementLoadFailed = true;
-            EngagementErrorMessage = "Unable to refresh dashboard engagement data.";
-            SetDashboardMessage(EngagementErrorMessage, false);
-        }
-        catch (JsonException)
-        {
-            EngagementLoadFailed = true;
-            EngagementErrorMessage = "The engagement API returned invalid data.";
-            SetDashboardMessage(EngagementErrorMessage, false);
-        }
-        catch (OperationCanceledException)
-        {
-            EngagementLoadFailed = true;
-            EngagementErrorMessage = "The engagement API request timed out.";
-        }
-        finally
-        {
-            IsLoadingEngagement = false;
-            IsLoadingIssues = false;
-            _refreshLock.Release();
-        }
-    }
-
-    private async Task LoadPredictiveRecommendationsAsync()
-    {
-        if (!await _recommendationLock.WaitAsync(0))
-            return;
-
-        IsLoadingRecommendations = true;
-
-        try
-        {
-            var client = HttpClientFactory.CreateClient("SmartXApi");
-
-            var readings = await client.GetFromJsonAsync<List<TelemetryHistoryDto>>(
-                "api/telemetry-history/recent?countPerSensor=100");
-
-            if (readings is null)
-            {
-                RecommendationLoadFailed = true;
-                RecommendationMessage = "The telemetry history API returned an empty response.";
-                return;
-            }
-
-            // Keep non-finite values so the engine can identify invalid telemetry.
-            // Reject only readings that cannot be associated with a sensor and metric.
-            var observations = readings
-                .Where(reading =>
-                    reading.SensorId != Guid.Empty &&
-                    !string.IsNullOrWhiteSpace(reading.MetricName))
-                .Select(reading => new TelemetryObservation
+                await InvokeAsync(() =>
                 {
-                    DeviceId = reading.SensorId,
-                    Metric = reading.MetricName.Trim(),
-                    Value = reading.Value,
-                    Unit = reading.Unit ?? string.Empty,
-                    ObservedAt = reading.ObservedAt.UtcDateTime,
-                    WarningThreshold = reading.WarningThreshold,
-                    CriticalThreshold = reading.CriticalThreshold
-                })
-                .ToList();
-
-            var generated = RecommendationEngine.Generate(observations);
-
-            // Preserve separate device-specific and description-specific alerts.
-            var orderedRecommendations = generated
-                .GroupBy(RecommendationKey, StringComparer.OrdinalIgnoreCase)
-                .Select(group => group
-                    .OrderBy(item => item.Severity)
-                    .First())
-                .OrderBy(item => item.Severity)
-                .ThenBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(item => item.DeviceId)
-                .ToList();
-
-            // Update visible data only after retrieval and analysis succeed.
-            Recommendations = orderedRecommendations;
-
-            SensorsAnalysed = observations
-                .Select(item => item.DeviceId)
-                .Distinct()
-                .Count();
-
-            ReadingsAnalysed = observations.Count;
-            LastTelemetryAnalysisUtc = DateTimeOffset.UtcNow;
-            RecommendationLoadFailed = false;
-
-            RecommendationMessage = observations.Count == 0
-                ? "No timestamped sensor telemetry is available yet. Submit readings through the telemetry ingestion endpoint to enable sensor-based predictions. Operational command-state recommendations are also evaluated."
-                : $"Analysed {ReadingsAnalysed} readings across {SensorsAnalysed} sensors and evaluated current operational command state.";
-        }
-        catch (HttpRequestException)
-        {
-            RecommendationLoadFailed = true;
-            RecommendationMessage = "Predictive analysis could not retrieve telemetry history from the API. Previous recommendations are retained.";
-        }
-        catch (JsonException)
-        {
-            RecommendationLoadFailed = true;
-            RecommendationMessage = "The telemetry history API returned data in an unexpected format. Previous recommendations are retained.";
-        }
-        catch (OperationCanceledException)
-        {
-            RecommendationLoadFailed = true;
-            RecommendationMessage = "The telemetry history request timed out. Previous recommendations are retained.";
-        }
-        catch (NotSupportedException)
-        {
-            RecommendationLoadFailed = true;
-            RecommendationMessage = "The telemetry history response could not be deserialised. Previous recommendations are retained.";
-        }
-        finally
-        {
-            IsLoadingRecommendations = false;
-            _recommendationLock.Release();
-        }
-    }
-
-    private async Task ReportIssueAsync()
-    {
-        DashboardMessage = null;
-
-        if (string.IsNullOrWhiteSpace(NewIssueTitle))
-        {
-            SetDashboardMessage("Issue title is required.", false);
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(NewIssueDescription))
-        {
-            SetDashboardMessage("Issue description is required.", false);
-            return;
-        }
-
-        IsReportingIssue = true;
-
-        try
-        {
-            var client = HttpClientFactory.CreateClient("SmartXApi");
-
-            var issue = new UserIssue
-            {
-                Title = NewIssueTitle.Trim(),
-                Description = NewIssueDescription.Trim(),
-                Severity = NewIssueSeverity,
-                Status = "Open"
-            };
-
-            using var response = await client.PostAsJsonAsync(
-                "api/dashboard/issues",
-                issue);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                SetDashboardMessage(
-                    $"Issue could not be reported. HTTP {(int)response.StatusCode}.",
-                    false);
-                return;
-            }
-
-            NewIssueTitle = string.Empty;
-            NewIssueDescription = string.Empty;
-            NewIssueSeverity = "Info";
-
-            SetDashboardMessage("Incident added to the live engagement system.", true);
-            await LoadEngagementAsync();
-        }
-        catch (HttpRequestException)
-        {
-            SetDashboardMessage("Unable to connect to the Smart-X API.", false);
-        }
-        catch (OperationCanceledException)
-        {
-            SetDashboardMessage("The incident report request timed out.", false);
-        }
-        catch (JsonException)
-        {
-            SetDashboardMessage("The incident report returned invalid data.", false);
-        }
-        finally
-        {
-            IsReportingIssue = false;
-        }
-    }
-
-    private async Task ResolveIssueAsync(Guid issueId)
-    {
-        if (IsResolvingIssue || issueId == Guid.Empty)
-            return;
-
-        IsResolvingIssue = true;
-
-        try
-        {
-            var client = HttpClientFactory.CreateClient("SmartXApi");
-
-            using var response = await client.PutAsync(
-                $"api/dashboard/issues/{issueId}/resolve",
-                content: null);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                SetDashboardMessage(
-                    $"Issue could not be resolved. HTTP {(int)response.StatusCode}.",
-                    false);
-                return;
-            }
-
-            SetDashboardMessage("Incident resolved and engagement priorities updated.", true);
-            await LoadEngagementAsync();
-        }
-        catch (HttpRequestException)
-        {
-            SetDashboardMessage("Unable to connect to the Smart-X API.", false);
-        }
-        catch (OperationCanceledException)
-        {
-            SetDashboardMessage("The incident resolution request timed out.", false);
-        }
-        finally
-        {
-            IsResolvingIssue = false;
-        }
-    }
-
-    private void SetDashboardMessage(string message, bool success)
-    {
-        DashboardMessage = message;
-        DashboardMessageCssClass = success
-            ? "connection-success"
-            : "connection-error";
-    }
-
-    private void StartLiveRefresh()
-    {
-        if (_refreshTask is not null)
-            return;
-
-        _refreshCancellation = new CancellationTokenSource();
-        _refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(10));
-        _refreshTask = RefreshLoopAsync(_refreshCancellation.Token);
-    }
-
-    private async Task RefreshLoopAsync(CancellationToken cancellationToken)
-    {
-        var timer = _refreshTimer;
-
-        if (timer is null)
-            return;
-
-        try
-        {
-            while (await timer.WaitForNextTickAsync(cancellationToken))
-            {
-                await InvokeAsync(async () =>
-                {
-                    if (!GatewayOnline)
-                    {
-                        await CheckGatewayAsync();
-                        return;
-                    }
-
-                    await LoadEngagementAsync();
-                    await LoadPredictiveRecommendationsAsync();
-
+                    RefreshStatus = "Degraded";
+                    PageError = "Automatic refresh stopped unexpectedly. Use Refresh now to retry.";
                     StateHasChanged();
                 });
             }
         }
-        catch (OperationCanceledException)
+    }
+
+    private async Task RefreshNowAsync()
+    {
+        if (_disposed || !await _refreshLock.WaitAsync(0))
+            return;
+
+        IsRefreshing = true;
+        LastRefreshAttempt = DateTimeOffset.UtcNow;
+
+        try
         {
-            // Expected when the component is disposed.
+            var client = HttpClientFactory.CreateClient("SmartX.Api");
+
+            await CheckGatewayAsync(client, _disposeCts.Token);
+
+            using var response = await client.GetAsync(
+                "api/telemetry-history/recent?countPerSensor=100",
+                _disposeCts.Token);
+
+            response.EnsureSuccessStatusCode();
+
+            var result = await response.Content
+                .ReadFromJsonAsync<List<TelemetryHistoryDto>>(
+                    cancellationToken: _disposeCts.Token);
+
+            if (result is null)
+                throw new JsonException("The telemetry API returned an empty response.");
+
+            var validReadings = result
+                .Where(IsValidReading)
+                .OrderByDescending(x => x.ObservedAt)
+                .ToList();
+
+            var observations = validReadings
+                .Select(x => new TelemetryObservation
+                {
+                    DeviceId = x.SensorId,
+                    Metric = x.MetricName.Trim(),
+                    Value = x.Value,
+                    Unit = x.Unit ?? string.Empty,
+                    ObservedAt = x.ObservedAt,
+                    WarningThreshold = x.WarningThreshold,
+                    CriticalThreshold = x.CriticalThreshold
+                })
+                .ToList();
+
+            try
+            {
+                Recommendations = RecommendationEngine.Generate(observations).ToList();
+                RecommendationMessage = null;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Recommendation generation failed.");
+                RecommendationMessage =
+                    "Telemetry refreshed, but recommendation generation failed. Previous recommendations have been retained.";
+            }
+
+            TelemetryReadings = validReadings;
+            LastSuccessfulRefresh = DateTimeOffset.UtcNow;
+            PageError = null;
+            RefreshStatus = "Live";
+
+            if (validReadings.Count == 0)
+            {
+                RecommendationMessage ??=
+                    "No valid telemetry readings were returned by the API.";
+            }
         }
-        catch (ObjectDisposedException)
+        catch (OperationCanceledException) when (_disposeCts.IsCancellationRequested)
         {
-            // The timer may be disposed during navigation.
+            // Expected during disposal.
         }
-        catch (InvalidOperationException)
+        catch (HttpRequestException ex)
         {
-            // The renderer may no longer be available during navigation.
+            Logger.LogWarning(ex, "Telemetry API request failed.");
+            PageError =
+                "Unable to retrieve telemetry. Check the API availability and the configured HTTP client.";
+            RefreshStatus = "Degraded";
+        }
+        catch (JsonException ex)
+        {
+            Logger.LogWarning(ex, "Telemetry response parsing failed.");
+            PageError = "The telemetry API returned data in an unexpected format.";
+            RefreshStatus = "Degraded";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unexpected dashboard refresh failure.");
+            PageError =
+                "An unexpected error occurred. Previously loaded telemetry and recommendations have been retained.";
+            RefreshStatus = "Degraded";
+        }
+        finally
+        {
+            IsRefreshing = false;
+            IsInitialLoad = false;
+            _refreshLock.Release();
+
+            if (!_disposed)
+                await InvokeAsync(StateHasChanged);
         }
     }
 
-    public async ValueTask DisposeAsync()
+    private async Task CheckGatewayAsync(
+        HttpClient client,
+        CancellationToken cancellationToken)
     {
-        _refreshCancellation?.Cancel();
-        _refreshTimer?.Dispose();
-
-        if (_refreshTask is not null)
+        try
         {
-            try
-            {
-                await _refreshTask;
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected during disposal.
-            }
-            catch (ObjectDisposedException)
-            {
-                // The timer has already been disposed.
-            }
+            using var response = await client.GetAsync(
+                "api/telemetry/health",
+                cancellationToken);
+
+            GatewayStatus = response.IsSuccessStatusCode ? "Online" : "Offline";
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Gateway health check failed.");
+            GatewayStatus = "Offline";
+        }
+    }
 
-        _refreshCancellation?.Dispose();
+    private static bool IsValidReading(TelemetryHistoryDto reading)
+    {
+        return reading.SensorId != Guid.Empty
+            && !string.IsNullOrWhiteSpace(reading.MetricName)
+            && double.IsFinite(reading.Value)
+            && double.IsFinite(reading.WarningThreshold)
+            && double.IsFinite(reading.CriticalThreshold)
+            && reading.ObservedAt != default
+            && reading.ObservedAt <= DateTimeOffset.UtcNow.AddMinutes(5);
+    }
 
-        // Keep the semaphores alive for any outstanding UI operation
-        // that still needs to release them.
+    private static string SeverityBadge(RecommendationSeverity severity) =>
+        severity switch
+        {
+            RecommendationSeverity.Critical => "text-bg-danger",
+            RecommendationSeverity.Warning => "text-bg-warning",
+            _ => "text-bg-info"
+        };
+
+    private static string SeverityBorder(RecommendationSeverity severity) =>
+        severity switch
+        {
+            RecommendationSeverity.Critical => "border-danger",
+            RecommendationSeverity.Warning => "border-warning",
+            _ => "border-info"
+        };
+
+    private static string RecommendationKey(SmartXRecommendation recommendation) =>
+        $"{recommendation.Severity}|{recommendation.DeviceId}|{recommendation.Title}|{recommendation.Description}";
+
+    private static string TelemetryKey(TelemetryHistoryDto reading) =>
+        $"{reading.SensorId:N}|{reading.MetricName}|{reading.ObservedAt.UtcDateTime.Ticks}";
+
+    private static string FormatThreshold(double value) =>
+        value == 0 ? "—" : value.ToString("0.##");
+
+    private static string FreshnessText(DateTimeOffset observedAt)
+    {
+        var age = DateTimeOffset.UtcNow - observedAt.ToUniversalTime();
+
+        if (age < TimeSpan.FromMinutes(1))
+            return "Recent";
+
+        if (age > StaleThreshold)
+            return "Stale";
+
+        return $"{(int)age.TotalMinutes} min ago";
+    }
+
+    private static string FreshnessBadge(DateTimeOffset observedAt)
+    {
+        var age = DateTimeOffset.UtcNow - observedAt.ToUniversalTime();
+
+        if (age < TimeSpan.FromMinutes(1))
+            return "text-bg-success";
+
+        return age > StaleThreshold
+            ? "text-bg-warning"
+            : "text-bg-secondary";
     }
 
     private sealed class TelemetryHistoryDto
@@ -1279,5 +492,31 @@
         public string Unit { get; set; } = string.Empty;
         public double WarningThreshold { get; set; }
         public double CriticalThreshold { get; set; }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed)
+            return;
+
+        _disposed = true;
+
+        await _disposeCts.CancelAsync();
+        _timer?.Dispose();
+
+        if (_refreshLoop is not null)
+        {
+            try
+            {
+                await _refreshLoop;
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during disposal.
+            }
+        }
+
+        _refreshLock.Dispose();
+        _disposeCts.Dispose();
     }
 }

@@ -27,14 +27,14 @@ public sealed class TelemetryHistoryService
         _maxReadingsPerSensor = maxReadingsPerSensor;
     }
 
-    public void AddReading(Guid sensorId, double value)
-        => AddReading(sensorId, value, DateTimeOffset.UtcNow);
+    public void AddReading(Guid sensorId, double value) =>
+        AddReading(sensorId, value, DateTimeOffset.UtcNow);
 
     public void AddReading(
         Guid sensorId,
         double value,
-        DateTimeOffset observedAt)
-        => AddReading(
+        DateTimeOffset observedAt) =>
+        AddReading(
             sensorId, value, string.Empty, string.Empty,
             0, 0, observedAt);
 
@@ -42,8 +42,8 @@ public sealed class TelemetryHistoryService
         Guid sensorId,
         double value,
         string metricName,
-        string unit)
-        => AddReading(
+        string unit) =>
+        AddReading(
             sensorId, value, metricName, unit,
             0, 0, DateTimeOffset.UtcNow);
 
@@ -52,8 +52,8 @@ public sealed class TelemetryHistoryService
         double value,
         string metricName,
         string unit,
-        DateTimeOffset observedAt)
-        => AddReading(
+        DateTimeOffset observedAt) =>
+        AddReading(
             sensorId, value, metricName, unit,
             0, 0, observedAt);
 
@@ -63,8 +63,8 @@ public sealed class TelemetryHistoryService
         string metricName,
         string unit,
         double warningThreshold,
-        double criticalThreshold)
-        => AddReading(
+        double criticalThreshold) =>
+        AddReading(
             sensorId, value, metricName, unit,
             warningThreshold, criticalThreshold,
             DateTimeOffset.UtcNow);
@@ -118,14 +118,14 @@ public sealed class TelemetryHistoryService
             .Add(reading);
     }
 
-    public IReadOnlyList<double> GetReadings(Guid sensorId)
-        => GetTimestampedReadings(sensorId)
+    public IReadOnlyList<double> GetReadings(Guid sensorId) =>
+        GetTimestampedReadings(sensorId)
             .Select(reading => reading.Value)
             .ToArray();
 
     public IReadOnlyList<TelemetryHistoryReading> GetTimestampedReadings(
-        Guid sensorId)
-        => GetHistory(sensorId);
+        Guid sensorId) =>
+        GetHistory(sensorId);
 
     public IReadOnlyList<TelemetryHistoryReading> GetTimestampedReadings(
         Guid sensorId,
@@ -138,16 +138,59 @@ public sealed class TelemetryHistoryService
                 "Count must be greater than zero.");
         }
 
-        return GetHistory(sensorId)
-            .TakeLast(count)
-            .ToArray();
+        var snapshot = GetHistory(sensorId);
+        var start = Math.Max(0, snapshot.Count - count);
+
+        return snapshot.Skip(start).ToArray();
     }
 
-    public IReadOnlyDictionary<Guid, int> GetHistorySummary()
-        => _history.ToDictionary(
-            entry => entry.Key,
-            entry => entry.Value.Count);
+    /// <summary>
+    /// Returns readings within an inclusive UTC time range,
+    /// ordered from oldest to newest.
+    /// </summary>
+    public IReadOnlyList<TelemetryHistoryReading> GetReadingsBetween(
+        Guid sensorId,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        int? limit = null)
+    {
+        if (from > to)
+        {
+            throw new ArgumentException(
+                "The start time cannot be later than the end time.");
+        }
 
+        if (limit is < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(limit),
+                "Limit must be greater than zero.");
+        }
+
+        var history = GetHistory(sensorId);
+        var start = LowerBound(history, from.ToUniversalTime());
+        var results = new List<TelemetryHistoryReading>();
+
+        for (var i = start; i < history.Count; i++)
+        {
+            var reading = history[i];
+
+            if (reading.ObservedAt > to.ToUniversalTime())
+                break;
+
+            results.Add(reading);
+
+            if (limit.HasValue && results.Count >= limit.Value)
+                break;
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Returns a snapshot containing the most recent readings
+    /// across all sensors, globally ordered by observation time.
+    /// </summary>
     public IReadOnlyList<TelemetryHistoryReading> GetAllTimestampedReadings(
         int countPerSensor = 100)
     {
@@ -160,9 +203,73 @@ public sealed class TelemetryHistoryService
 
         return _history
             .SelectMany(entry =>
-                entry.Value.GetSnapshot().TakeLast(countPerSensor))
+            {
+                var snapshot = entry.Value.GetSnapshot();
+                var start = Math.Max(0, snapshot.Count - countPerSensor);
+
+                return snapshot.Skip(start);
+            })
             .OrderBy(reading => reading.ObservedAt)
+            .ThenBy(reading => reading.SensorId)
             .ToArray();
+    }
+
+    public IReadOnlyDictionary<Guid, int> GetHistorySummary() =>
+        _history.ToDictionary(
+            entry => entry.Key,
+            entry => entry.Value.Count);
+
+    public TelemetryTrendSummary? GetTrendSummary(
+        Guid sensorId,
+        int count = 20)
+    {
+        if (count < 2)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(count),
+                "At least two readings are required for trend analysis.");
+        }
+
+        var readings = GetTimestampedReadings(sensorId, count);
+
+        if (readings.Count < 2)
+            return null;
+
+        var first = readings[0];
+        var last = readings[^1];
+        var elapsedMinutes =
+            (last.ObservedAt - first.ObservedAt).TotalMinutes;
+
+        if (elapsedMinutes <= 0)
+            return null;
+
+        var values = readings.Select(x => x.Value).ToArray();
+        var change = last.Value - first.Value;
+        var slope = change / elapsedMinutes;
+
+        if (!double.IsFinite(slope))
+            return null;
+
+        var mean = values.Average();
+        var variance = values.Average(value =>
+            (value - mean) * (value - mean));
+
+        var standardDeviation = Math.Sqrt(variance);
+
+        return new TelemetryTrendSummary(
+            sensorId,
+            readings.Count,
+            first.ObservedAt,
+            last.ObservedAt,
+            first.Value,
+            last.Value,
+            change,
+            slope,
+            values.Min(),
+            values.Max(),
+            mean,
+            standardDeviation,
+            DetermineTrend(change, mean, standardDeviation));
     }
 
     public double[,] GetMatrix(Guid sensorId, int rows, int columns)
@@ -200,32 +307,70 @@ public sealed class TelemetryHistoryService
         return matrix;
     }
 
-    public int GetReadingCount(Guid sensorId)
-        => _history.TryGetValue(sensorId, out var history)
+    public int GetReadingCount(Guid sensorId) =>
+        _history.TryGetValue(sensorId, out var history)
             ? history.Count
             : 0;
 
     public DateTimeOffset? GetLatestObservedAt(Guid sensorId)
     {
-        var readings = GetTimestampedReadings(sensorId);
+        if (!_history.TryGetValue(sensorId, out var history))
+            return null;
 
-        return readings.Count == 0
-            ? null
-            : readings[^1].ObservedAt;
+        return history.GetLatestObservedAt();
     }
 
-    public bool RemoveHistory(Guid sensorId)
-        => _history.TryRemove(sensorId, out _);
+    public bool RemoveHistory(Guid sensorId) =>
+        _history.TryRemove(sensorId, out _);
 
-    private IReadOnlyList<TelemetryHistoryReading> GetHistory(Guid sensorId)
-        => _history.TryGetValue(sensorId, out var history)
+    private IReadOnlyList<TelemetryHistoryReading> GetHistory(Guid sensorId) =>
+        _history.TryGetValue(sensorId, out var history)
             ? history.GetSnapshot()
             : Array.Empty<TelemetryHistoryReading>();
+
+    private static int LowerBound(
+        IReadOnlyList<TelemetryHistoryReading> readings,
+        DateTimeOffset timestamp)
+    {
+        var low = 0;
+        var high = readings.Count;
+
+        while (low < high)
+        {
+            var middle = low + (high - low) / 2;
+
+            if (readings[middle].ObservedAt < timestamp)
+                low = middle + 1;
+            else
+                high = middle;
+        }
+
+        return low;
+    }
+
+    private static string DetermineTrend(
+        double change,
+        double mean,
+        double standardDeviation)
+    {
+        var scale = Math.Max(Math.Abs(mean), 1.0);
+        var tolerance = Math.Max(
+            scale * 0.001,
+            standardDeviation * 0.05);
+
+        if (change > tolerance)
+            return "Increasing";
+
+        if (change < -tolerance)
+            return "Decreasing";
+
+        return "Stable";
+    }
 
     private sealed class SensorHistory
     {
         private readonly object _sync = new();
-        private readonly Queue<TelemetryHistoryReading> _readings = new();
+        private readonly List<TelemetryHistoryReading> _readings = new();
         private readonly int _capacity;
 
         public SensorHistory(int capacity)
@@ -238,9 +383,7 @@ public sealed class TelemetryHistoryService
             get
             {
                 lock (_sync)
-                {
                     return _readings.Count;
-                }
             }
         }
 
@@ -248,11 +391,25 @@ public sealed class TelemetryHistoryService
         {
             lock (_sync)
             {
-                _readings.Enqueue(reading);
-
-                while (_readings.Count > _capacity)
+                // Fast path for the normal case: readings arrive in order.
+                if (_readings.Count == 0 ||
+                    _readings[^1].ObservedAt <= reading.ObservedAt)
                 {
-                    _readings.Dequeue();
+                    _readings.Add(reading);
+                }
+                else
+                {
+                    // Binary search keeps out-of-order ingestion correctly
+                    // ordered without sorting the entire history.
+                    var index = FindInsertionIndex(reading.ObservedAt);
+                    _readings.Insert(index, reading);
+                }
+
+                // Retain the newest readings if capacity is exceeded.
+                if (_readings.Count > _capacity)
+                {
+                    var excess = _readings.Count - _capacity;
+                    _readings.RemoveRange(0, excess);
                 }
             }
         }
@@ -260,9 +417,36 @@ public sealed class TelemetryHistoryService
         public IReadOnlyList<TelemetryHistoryReading> GetSnapshot()
         {
             lock (_sync)
-            {
                 return _readings.ToArray();
+        }
+
+        public DateTimeOffset? GetLatestObservedAt()
+        {
+            lock (_sync)
+            {
+                return _readings.Count == 0
+                    ? null
+                    : _readings[^1].ObservedAt;
             }
+        }
+
+        private int FindInsertionIndex(DateTimeOffset timestamp)
+        {
+            var low = 0;
+            var high = _readings.Count;
+
+            // Insert after existing readings with the same timestamp.
+            while (low < high)
+            {
+                var middle = low + (high - low) / 2;
+
+                if (_readings[middle].ObservedAt <= timestamp)
+                    low = middle + 1;
+                else
+                    high = middle;
+            }
+
+            return low;
         }
     }
 }
@@ -275,3 +459,18 @@ public sealed record TelemetryHistoryReading(
     string Unit = "",
     double WarningThreshold = 0,
     double CriticalThreshold = 0);
+
+public sealed record TelemetryTrendSummary(
+    Guid SensorId,
+    int ReadingCount,
+    DateTimeOffset FirstObservedAt,
+    DateTimeOffset LastObservedAt,
+    double FirstValue,
+    double LatestValue,
+    double Change,
+    double ChangePerMinute,
+    double Minimum,
+    double Maximum,
+    double Average,
+    double StandardDeviation,
+    string Trend);
