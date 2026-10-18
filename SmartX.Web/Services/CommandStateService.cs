@@ -420,10 +420,7 @@ public sealed class CommandStateService
         return processed;
     }
 
-    /// <summary>
-    /// Marks a command as failed, removes it from pending queues,
-    /// records the failure in the audit log and raises StateChanged.
-    /// </summary>
+  
     public bool MarkCommandFailed(Guid commandId, string? reason = null)
     {
         CommandRecord? record;
@@ -462,9 +459,6 @@ public sealed class CommandStateService
         return true;
     }
 
-    /// <summary>
-    /// Records a command failure and marks its device as having an active error.
-    /// </summary>
     public bool MarkCommandFailed(
         Guid commandId,
         string? reason,

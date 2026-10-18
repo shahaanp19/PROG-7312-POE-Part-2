@@ -151,7 +151,7 @@ public sealed class CriticalAlertStreamService : IAsyncDisposable
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
         {
-            // Expected during disposal.
+            
         }
     }
 

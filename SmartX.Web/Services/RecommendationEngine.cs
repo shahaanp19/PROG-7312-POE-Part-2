@@ -166,7 +166,6 @@ public sealed class RecommendationEngine
         if (relativeChange < 0.05)
             return;
 
-        // Avoid presenting an unstable forecast as a confident prediction.
         var trendMagnitude = Math.Abs(slope) * ForecastHorizon.TotalMinutes;
         if (noise > Math.Max(scale * 0.5, trendMagnitude * 2))
             return;
