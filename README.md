@@ -10,7 +10,9 @@ This project focuses on the practical application of data structures and reliabl
 
 | Resource | Link |
 |---|---|
-| Application demonstration video | [Add YouTube link here]() |
+| Application demonstration video | https://youtu.be/A_JL8Nxhzt8 |
+
+- The audio for the youtube video was not working so i added a script in the description
 
 ## Key Features
 
@@ -169,6 +171,6 @@ Potential areas for further development include:
 | Domain | IoT gateway command management and diagnostics |
 | Framework | .NET 10 / Blazor Web App |
 | Assessment | Part 2 — Data Structures and Application Functionality |
-| Demonstration | [YouTube demonstration link]() |
+| Demonstration | https://youtu.be/A_JL8Nxhzt8 |
 
 - Shahaan Pillay - ST10438099
