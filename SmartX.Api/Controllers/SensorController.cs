@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿
+using Microsoft.AspNetCore.Mvc;
 using SmartX.Api.Services;
 
 namespace SmartX.Api.Controllers;
@@ -20,24 +21,135 @@ public class SensorController : ControllerBase
         return Ok(_registry.GetAll());
     }
 
-    [HttpGet("{sensorId:guid}")]
-    public IActionResult Get(Guid sensorId)
-    {
-        var sensor = _registry.Get(sensorId);
-
-        return sensor is null
-            ? NotFound()
-            : Ok(sensor);
-    }
-
     [HttpGet("health")]
     public IActionResult Health()
     {
         return Ok(new
         {
             status = "Healthy",
-            service = "Sensor API",
+            service = "Sensor Mesh API",
             timestampUtc = DateTime.UtcNow
+        });
+    }
+
+    [HttpGet("topology")]
+    public IActionResult GetTopology()
+    {
+        var sensors = _registry.GetAll();
+
+        var connections = _registry.GetAllConnections()
+            .Select(edge => new
+            {
+                source = edge.FirstSensorId,
+                target = edge.SecondSensorId
+            });
+
+        return Ok(new
+        {
+            sensorCount = sensors.Count,
+            connectionCount = connections.Count(),
+            sensors,
+            connections
+        });
+    }
+
+    [HttpGet("{sensorId:guid}")]
+    public IActionResult Get(Guid sensorId)
+    {
+        var sensor = _registry.Get(sensorId);
+
+        return sensor is null ? NotFound() : Ok(sensor);
+    }
+
+    [HttpGet("{sensorId:guid}/neighbors")]
+    public IActionResult GetNeighbors(Guid sensorId)
+    {
+        if (!_registry.Contains(sensorId))
+            return NotFound(new { message = "Sensor not found." });
+
+        return Ok(_registry.GetNeighbors(sensorId));
+    }
+
+    [HttpPost("connections")]
+    public IActionResult AddConnection([FromBody] MeshConnectionRequest request)
+    {
+        if (request.FirstSensorId == Guid.Empty ||
+            request.SecondSensorId == Guid.Empty ||
+            request.FirstSensorId == request.SecondSensorId)
+        {
+            return BadRequest(new { message = "Provide two different valid sensor IDs." });
+        }
+
+        if (!_registry.Contains(request.FirstSensorId) ||
+            !_registry.Contains(request.SecondSensorId))
+        {
+            return NotFound(new { message = "Both sensors must be registered before connecting them." });
+        }
+
+        if (!_registry.AddConnection(request.FirstSensorId, request.SecondSensorId))
+            return Conflict(new { message = "The connection could not be created." });
+
+        return Ok(new
+        {
+            message = "Wireless connection created.",
+            request.FirstSensorId,
+            request.SecondSensorId
+        });
+    }
+
+    [HttpDelete("connections")]
+    public IActionResult RemoveConnection([FromBody] MeshConnectionRequest request)
+    {
+        return _registry.RemoveConnection(
+            request.FirstSensorId,
+            request.SecondSensorId)
+            ? NoContent()
+            : NotFound(new { message = "Wireless connection not found." });
+    }
+
+    [HttpGet("mesh/{gatewayId:guid}/bfs")]
+    public IActionResult BreadthFirstSearch(Guid gatewayId)
+    {
+        if (!_registry.Contains(gatewayId))
+            return NotFound(new { message = "Gateway sensor not found." });
+
+        return Ok(new
+        {
+            gatewayId,
+            traversal = _registry.BreadthFirstSearch(gatewayId)
+        });
+    }
+
+    [HttpGet("mesh/{gatewayId:guid}/dfs")]
+    public IActionResult DepthFirstSearch(Guid gatewayId)
+    {
+        if (!_registry.Contains(gatewayId))
+            return NotFound(new { message = "Gateway sensor not found." });
+
+        return Ok(new
+        {
+            gatewayId,
+            traversal = _registry.DepthFirstSearch(gatewayId)
+        });
+    }
+
+    [HttpGet("mesh/{gatewayId:guid}/status")]
+    public IActionResult GetMeshStatus(Guid gatewayId)
+    {
+        if (!_registry.Contains(gatewayId))
+            return NotFound(new { message = "Gateway sensor not found." });
+
+        var hopDistances = _registry.GetHopDistances(gatewayId);
+        var disconnected = _registry.GetDisconnectedSensors(gatewayId);
+
+        return Ok(new
+        {
+            gatewayId,
+            totalSensors = _registry.GetAll().Count,
+            reachableSensors = hopDistances.Count,
+            disconnectedSensors = disconnected,
+            hopDistances,
+            networkConnected = disconnected.Count == 0
         });
     }
 
@@ -50,9 +162,8 @@ public class SensorController : ControllerBase
     }
 }
 
-
-//References
-//tdykstra (2024). Create web APIs with ASP.NET Core. [online] Microsoft.com. Available at: https://learn.microsoft.com/en-us/aspnet/core/web-api/?view=aspnetcore-10.0 [Accessed 12 Sept. 2026].
-//wadepickett (2025). Tutorial: Create a controller-based web API with ASP.NET Core. [online] Microsoft.com. Available at: https://learn.microsoft.com/en-us/aspnet/core/tutorials/first-web-api?view=aspnetcore-10.0&tabs=visual-studio [Accessed 12 Sept. 2026].
-//tdykstra (2025). Model validation in ASP.NET Core MVC. [online] Microsoft.com. Available at: https://learn.microsoft.com/en-us/aspnet/core/mvc/models/validation?view=aspnetcore-10.0 [Accessed 12 Sept. 2026].
-//tdykstra (2024). Dependency injection in ASP.NET Core. [online] Microsoft.com. Available at: https://learn.microsoft.com/en-us/aspnet/core/fundamentals/dependency-injection?view=aspnetcore-10.0 [Accessed 12 Sept. 2026].
+public class MeshConnectionRequest
+{
+    public Guid FirstSensorId { get; set; }
+    public Guid SecondSensorId { get; set; }
+}

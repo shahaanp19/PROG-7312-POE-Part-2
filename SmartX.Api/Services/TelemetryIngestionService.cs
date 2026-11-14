@@ -1,5 +1,4 @@
 ﻿
-using System;
 using System.Diagnostics;
 using SmartX.Shared.DTOs;
 using SmartX.Shared.Models;
@@ -10,12 +9,17 @@ namespace SmartX.Api.Services;
 public class TelemetryIngestionService
 {
     private readonly TelemetryValidator _validator;
+    private readonly TelemetryHistoryService _historyService;
 
     public TelemetryIngestionService(
-        TelemetryValidator validator)
+        TelemetryValidator validator,
+        TelemetryHistoryService historyService)
     {
         _validator = validator
             ?? throw new ArgumentNullException(nameof(validator));
+
+        _historyService = historyService
+            ?? throw new ArgumentNullException(nameof(historyService));
     }
 
     public TelemetryIngestionResult Process(
@@ -30,6 +34,15 @@ public class TelemetryIngestionService
         try
         {
             var validationResult = _validator.Validate(metric, value);
+
+            if (validationResult.IsValid &&
+                metric.SensorDeviceId != Guid.Empty)
+            {
+                _historyService.AddReading(
+                    metric.SensorDeviceId,
+                    value,
+                    processedAtUtc);
+            }
 
             return new TelemetryIngestionResult
             {

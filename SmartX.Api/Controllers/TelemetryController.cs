@@ -23,12 +23,7 @@ public class TelemetryController : ControllerBase
         RecursiveDeploymentValidator deploymentValidator,
         SensorRegistryService sensorRegistry,
         TelemetryBatchProcessor batchProcessor)
-        : this(
-            ingestionService,
-            deploymentValidator,
-            sensorRegistry,
-            batchProcessor,
-            null)
+        : this(ingestionService, deploymentValidator, sensorRegistry, batchProcessor, null)
     {
     }
 
@@ -74,9 +69,7 @@ public class TelemetryController : ControllerBase
         }
 
         if (!ModelState.IsValid)
-        {
             return ValidationProblem(ModelState);
-        }
 
         if (request.SensorDeviceId == Guid.Empty)
         {
@@ -161,9 +154,7 @@ public class TelemetryController : ControllerBase
         var result = _ingestionService.Process(metric, request.Value);
 
         if (!result.Success)
-        {
             return UnprocessableEntity(result);
-        }
 
         _historyService?.AddReading(
             request.SensorDeviceId,
@@ -175,6 +166,138 @@ public class TelemetryController : ControllerBase
             DateTimeOffset.UtcNow);
 
         return Ok(result);
+    }
+
+    // Returns the complete ordered telemetry history for one sensor.
+    [HttpGet("history/{sensorId:guid}")]
+    public IActionResult GetSensorHistory(Guid sensorId)
+    {
+        if (_historyService is null)
+            return StatusCode(503, new { message = "Telemetry history service is unavailable." });
+
+        if (sensorId == Guid.Empty)
+            return BadRequest(new { message = "A valid sensor ID is required." });
+
+        var readings = _historyService.GetTimestampedReadings(sensorId);
+
+        return Ok(new
+        {
+            sensorId,
+            count = readings.Count,
+            readings
+        });
+    }
+
+    // Returns the most recent N readings for one sensor.
+    [HttpGet("history/{sensorId:guid}/latest")]
+    public IActionResult GetLatestSensorReadings(
+        Guid sensorId,
+        [FromQuery] int count = 100)
+    {
+        if (_historyService is null)
+            return StatusCode(503, new { message = "Telemetry history service is unavailable." });
+
+        if (sensorId == Guid.Empty)
+            return BadRequest(new { message = "A valid sensor ID is required." });
+
+        if (count <= 0 || count > 10_000)
+            return BadRequest(new { message = "Count must be between 1 and 10000." });
+
+        var readings = _historyService.GetTimestampedReadings(sensorId, count);
+
+        return Ok(new
+        {
+            sensorId,
+            requestedCount = count,
+            returnedCount = readings.Count,
+            readings
+        });
+    }
+
+    // AVL-tree range query. Both endpoints are inclusive.
+    // Supply timestamps in ISO 8601 format.
+    [HttpGet("history/{sensorId:guid}/range")]
+    public IActionResult GetSensorReadingsBetween(
+        Guid sensorId,
+        [FromQuery] DateTimeOffset from,
+        [FromQuery] DateTimeOffset to,
+        [FromQuery] int? limit = null)
+    {
+        if (_historyService is null)
+            return StatusCode(503, new { message = "Telemetry history service is unavailable." });
+
+        if (sensorId == Guid.Empty)
+            return BadRequest(new { message = "A valid sensor ID is required." });
+
+        if (from > to)
+            return BadRequest(new { message = "The start time cannot be later than the end time." });
+
+        if (limit is < 1 or > 10_000)
+            return BadRequest(new { message = "Limit must be between 1 and 10000." });
+
+        var readings = _historyService.GetReadingsBetween(
+            sensorId,
+            from,
+            to,
+            limit);
+
+        return Ok(new
+        {
+            sensorId,
+            fromUtc = from.ToUniversalTime(),
+            toUtc = to.ToUniversalTime(),
+            inclusiveRange = true,
+            returnedCount = readings.Count,
+            readings
+        });
+    }
+
+    // Provides the number of retained readings for each sensor.
+    [HttpGet("history/summary")]
+    public IActionResult GetHistorySummary()
+    {
+        if (_historyService is null)
+            return StatusCode(503, new { message = "Telemetry history service is unavailable." });
+
+        var summary = _historyService.GetHistorySummary();
+
+        return Ok(new
+        {
+            sensorCount = summary.Count,
+            totalReadings = summary.Values.Sum(),
+            sensors = summary.Select(entry => new
+            {
+                sensorId = entry.Key,
+                readingCount = entry.Value
+            })
+        });
+    }
+
+    // Provides statistical and trend information for a sensor.
+    [HttpGet("history/{sensorId:guid}/trend")]
+    public IActionResult GetSensorTrend(
+        Guid sensorId,
+        [FromQuery] int count = 20)
+    {
+        if (_historyService is null)
+            return StatusCode(503, new { message = "Telemetry history service is unavailable." });
+
+        if (sensorId == Guid.Empty)
+            return BadRequest(new { message = "A valid sensor ID is required." });
+
+        if (count < 2 || count > 10_000)
+            return BadRequest(new { message = "Count must be between 2 and 10000." });
+
+        var trend = _historyService.GetTrendSummary(sensorId, count);
+
+        if (trend is null)
+            return NotFound(new
+            {
+                message = "Insufficient historical readings are available to calculate a trend.",
+                sensorId
+            });
+
+        return Ok(trend);
     }
 
     [HttpGet("generic-demo")]
@@ -443,14 +566,9 @@ public class TelemetryController : ControllerBase
             new float[] { 24.7f, 25.1f, 25.6f, 26.0f }
         };
 
-        var packets = _batchProcessor.ProcessHistoricalBatches(
-            historicalBatches);
-
-        var matrix = _batchProcessor.CreateTelemetryMatrix(
-            historicalBatches);
-
-        var flattened = _batchProcessor.FlattenTelemetryBatches(
-            historicalBatches);
+        var packets = _batchProcessor.ProcessHistoricalBatches(historicalBatches);
+        var matrix = _batchProcessor.CreateTelemetryMatrix(historicalBatches);
+        var flattened = _batchProcessor.FlattenTelemetryBatches(historicalBatches);
 
         var matrixRows = matrix.GetLength(0);
         var matrixColumns = matrix.GetLength(1);
@@ -461,9 +579,7 @@ public class TelemetryController : ControllerBase
             var rowData = new float[matrixColumns];
 
             for (var column = 0; column < matrixColumns; column++)
-            {
                 rowData[column] = matrix[row, column];
-            }
 
             matrixData.Add(rowData);
         }
@@ -475,7 +591,6 @@ public class TelemetryController : ControllerBase
         for (var index = 0; index < historicalBatches.Length; index++)
         {
             var size = historicalBatches[index]?.Length ?? 0;
-
             batchSizes[index] = size;
             totalReadings += size;
             largestBatchSize = Math.Max(largestBatchSize, size);
@@ -519,8 +634,7 @@ public class TelemetryController : ControllerBase
             validation = new
             {
                 packetCountMatchesSource = packets.Count == totalReadings,
-                flattenedCountMatchesSource =
-                    flattened.Length == totalReadings,
+                flattenedCountMatchesSource = flattened.Length == totalReadings,
                 matrixDimensionsValid =
                     matrixRows == historicalBatches.Length &&
                     matrixColumns == largestBatchSize

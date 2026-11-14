@@ -1,4 +1,5 @@
-﻿using SmartX.Api.Controllers;
+﻿
+using SmartX.Api.Controllers;
 using SmartX.Api.Services;
 using SmartX.Shared.DTOs;
 using SmartX.Shared.Validators;
@@ -12,35 +13,25 @@ public class TelemetryIngestionIntegrationTests
     public void RegisteredSensor_ShouldSuccessfullyIngestTelemetryThroughApiPipeline()
     {
         // Arrange
-        var sensorRegistry =
-            new SensorRegistryService();
+        var sensorRegistry = new SensorRegistryService();
+        var thresholdValidator = new TelemetryThresholdValidator();
+        var telemetryValidator = new TelemetryValidator(thresholdValidator);
+        var historyService = new TelemetryHistoryService();
 
-        var thresholdValidator =
-            new TelemetryThresholdValidator();
+        var ingestionService = new TelemetryIngestionService(
+            telemetryValidator,
+            historyService);
 
-        var telemetryValidator =
-            new TelemetryValidator(
-                thresholdValidator);
+        var deploymentValidator = new RecursiveDeploymentValidator();
+        var batchProcessor = new TelemetryBatchProcessor();
 
-        var ingestionService =
-            new TelemetryIngestionService(
-                telemetryValidator);
+        var controller = new TelemetryController(
+            ingestionService,
+            deploymentValidator,
+            sensorRegistry,
+            batchProcessor);
 
-        var deploymentValidator =
-            new RecursiveDeploymentValidator();
-
-        var batchProcessor =
-            new TelemetryBatchProcessor();
-
-        var controller =
-            new TelemetryController(
-                ingestionService,
-                deploymentValidator,
-                sensorRegistry,
-                batchProcessor);
-
-        var sensorId =
-            Guid.NewGuid();
+        var sensorId = Guid.NewGuid();
 
         sensorRegistry.Register(
             sensorId,
@@ -52,62 +43,31 @@ public class TelemetryIngestionIntegrationTests
                 Location = "Hydroponic Farm A"
             });
 
-        var request =
-            new TelemetryIngestionRequest
-            {
-                SensorDeviceId =
-                    sensorId,
-
-                MetricName =
-                    "Soil Moisture",
-
-                Unit =
-                    "%",
-
-                Value =
-                    45,
-
-                MinimumExpectedValue =
-                    20,
-
-                MaximumExpectedValue =
-                    80,
-
-                WarningThreshold =
-                    70,
-
-                CriticalThreshold =
-                    90,
-
-                IsEnabled =
-                    true
-            };
+        var request = new TelemetryIngestionRequest
+        {
+            SensorDeviceId = sensorId,
+            MetricName = "Soil Moisture",
+            Unit = "%",
+            Value = 45,
+            MinimumExpectedValue = 20,
+            MaximumExpectedValue = 80,
+            WarningThreshold = 70,
+            CriticalThreshold = 90,
+            IsEnabled = true
+        };
 
         // Act
-        var result =
-            controller.Ingest(request);
+        var result = controller.Ingest(request);
 
         // Assert
-        var okResult =
-            Assert.IsType<OkObjectResult>(
-                result.Result);
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
 
         var ingestionResult =
-            Assert.IsType<TelemetryIngestionResult>(
-                okResult.Value);
+            Assert.IsType<TelemetryIngestionResult>(okResult.Value);
 
-        Assert.True(
-            ingestionResult.Success);
-
-        Assert.False(
-            ingestionResult.IsAnomaly);
-
-        Assert.Equal(
-            sensorId,
-            ingestionResult.SensorDeviceId);
-
-        Assert.NotEqual(
-            Guid.Empty,
-            ingestionResult.PacketId);
+        Assert.True(ingestionResult.Success);
+        Assert.False(ingestionResult.IsAnomaly);
+        Assert.Equal(sensorId, ingestionResult.SensorDeviceId);
+        Assert.NotEqual(Guid.Empty, ingestionResult.PacketId);
     }
 }
