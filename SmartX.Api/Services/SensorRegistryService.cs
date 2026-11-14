@@ -38,8 +38,8 @@ public class SensorRegistryService
             if (_sensors.ContainsKey(sensorId))
                 return false;
 
-            _sensors[sensorId] = sensor;
-            _connections[sensorId] = [];
+            _sensors.Add(sensorId, sensor);
+            _connections.Add(sensorId, new Dictionary<Guid, double>());
 
             return true;
         }
@@ -78,14 +78,15 @@ public class SensorRegistryService
     }
 
     /// <summary>
-    /// Adds a bidirectional connection with the default weight of 1.
+    /// Adds a bidirectional connection with a default weight of 1.
     /// </summary>
     public bool AddConnection(Guid firstSensorId, Guid secondSensorId) =>
         AddConnection(firstSensorId, secondSensorId, 1.0);
 
     /// <summary>
-    /// Adds a bidirectional wireless connection with a routing cost.
-    /// Lower weights represent more power-efficient routes.
+    /// Adds or updates a bidirectional wireless connection.
+    /// Lower weights represent lower routing costs.
+    /// Weights must be finite and non-negative.
     /// </summary>
     public bool AddConnection(
         Guid firstSensorId,
@@ -97,13 +98,17 @@ public class SensorRegistryService
             firstSensorId == secondSensorId ||
             !double.IsFinite(weight) ||
             weight < 0)
+        {
             return false;
+        }
 
         lock (_syncLock)
         {
             if (!_sensors.ContainsKey(firstSensorId) ||
                 !_sensors.ContainsKey(secondSensorId))
+            {
                 return false;
+            }
 
             _connections[firstSensorId][secondSensorId] = weight;
             _connections[secondSensorId][firstSensorId] = weight;
@@ -112,13 +117,17 @@ public class SensorRegistryService
         }
     }
 
-    public bool RemoveConnection(Guid firstSensorId, Guid secondSensorId)
+    public bool RemoveConnection(
+        Guid firstSensorId,
+        Guid secondSensorId)
     {
         lock (_syncLock)
         {
             if (!_connections.TryGetValue(firstSensorId, out var firstNeighbors) ||
                 !_connections.TryGetValue(secondSensorId, out var secondNeighbors))
+            {
                 return false;
+            }
 
             var removedFirst = firstNeighbors.Remove(secondSensorId);
             var removedSecond = secondNeighbors.Remove(firstSensorId);
@@ -137,6 +146,10 @@ public class SensorRegistryService
         }
     }
 
+    /// <summary>
+    /// Performs breadth-first traversal from the specified sensor.
+    /// Returns only vertices reachable from the starting vertex.
+    /// </summary>
     public IReadOnlyList<Guid> BreadthFirstSearch(Guid startSensorId)
     {
         lock (_syncLock)
@@ -166,6 +179,10 @@ public class SensorRegistryService
         }
     }
 
+    /// <summary>
+    /// Performs iterative depth-first traversal.
+    /// Returns only vertices reachable from the starting vertex.
+    /// </summary>
     public IReadOnlyList<Guid> DepthFirstSearch(Guid startSensorId)
     {
         lock (_syncLock)
@@ -188,7 +205,8 @@ public class SensorRegistryService
 
                 result.Add(current);
 
-                foreach (var neighbor in _connections[current].Keys.OrderByDescending(id => id))
+                foreach (var neighbor in
+                         _connections[current].Keys.OrderByDescending(id => id))
                 {
                     if (!visited.Contains(neighbor))
                         stack.Push(neighbor);
@@ -199,12 +217,21 @@ public class SensorRegistryService
         }
     }
 
+    /// <summary>
+    /// Returns all registered sensors that cannot be reached from the gateway.
+    /// If the gateway is not registered, every registered sensor is disconnected.
+    /// </summary>
     public IReadOnlyList<Guid> GetDisconnectedSensors(Guid gatewaySensorId)
     {
         lock (_syncLock)
         {
             if (!_connections.ContainsKey(gatewaySensorId))
-                return _sensors.Keys.OrderBy(id => id).ToList().AsReadOnly();
+            {
+                return _sensors.Keys
+                    .OrderBy(id => id)
+                    .ToList()
+                    .AsReadOnly();
+            }
 
             var reachable = new HashSet<Guid>();
             var queue = new Queue<Guid>();
@@ -231,7 +258,12 @@ public class SensorRegistryService
         }
     }
 
-    public IReadOnlyDictionary<Guid, int> GetHopDistances(Guid gatewaySensorId)
+    /// <summary>
+    /// Calculates minimum hop distances from a gateway using BFS.
+    /// Disconnected sensors are omitted from the returned dictionary.
+    /// </summary>
+    public IReadOnlyDictionary<Guid, int> GetHopDistances(
+        Guid gatewaySensorId)
     {
         lock (_syncLock)
         {
@@ -263,17 +295,26 @@ public class SensorRegistryService
         }
     }
 
-    public IReadOnlyList<(Guid FirstSensorId, Guid SecondSensorId)> GetAllConnections()
+    /// <summary>
+    /// Returns each undirected connection exactly once.
+    /// </summary>
+    public IReadOnlyList<(Guid FirstSensorId, Guid SecondSensorId)>
+        GetAllConnections()
     {
         lock (_syncLock)
         {
             return GetUniqueEdges()
-                .Select(edge => (edge.FirstSensorId, edge.SecondSensorId))
+                .Select(edge => (
+                    edge.FirstSensorId,
+                    edge.SecondSensorId))
                 .ToList()
                 .AsReadOnly();
         }
     }
 
+    /// <summary>
+    /// Returns each undirected weighted connection exactly once.
+    /// </summary>
     public IReadOnlyList<WeightedSensorConnection> GetWeightedConnections()
     {
         lock (_syncLock)
@@ -282,18 +323,21 @@ public class SensorRegistryService
 
     /// <summary>
     /// Calculates a minimum spanning forest using Prim's algorithm.
-    /// Handles disconnected networks by calculating a tree per component.
-    /// Complexity: O(V²) with the current adjacency representation.
+    /// Disconnected graphs produce one minimum spanning tree per component.
+    ///
+    /// Complexity: O(E log E) using a priority queue.
     /// </summary>
-    public IReadOnlyList<WeightedSensorConnection> GetMinimumSpanningTreePrim(
-        Guid? startSensorId = null)
+    public IReadOnlyList<WeightedSensorConnection>
+        GetMinimumSpanningTreePrim(Guid? startSensorId = null)
     {
         lock (_syncLock)
         {
             var result = new List<WeightedSensorConnection>();
             var visited = new HashSet<Guid>();
 
-            var startingVertices = _sensors.Keys.OrderBy(id => id).ToList();
+            var startingVertices = _sensors.Keys
+                .OrderBy(id => id)
+                .ToList();
 
             if (startSensorId.HasValue &&
                 _sensors.ContainsKey(startSensorId.Value))
@@ -307,17 +351,26 @@ public class SensorRegistryService
                 if (!visited.Add(start))
                     continue;
 
-                var candidates = new PriorityQueue<WeightedSensorConnection, (double Weight, Guid From, Guid To)>();
+                var candidates =
+                    new PriorityQueue<
+                        PrimCandidate,
+                        (double Weight, Guid First, Guid Second)>();
 
                 AddCandidateEdges(start, visited, candidates);
 
-                while (candidates.TryDequeue(out var edge, out _))
+                while (candidates.TryDequeue(
+                           out var candidate,
+                           out _))
                 {
-                    if (!visited.Add(edge.SecondSensorId))
+                    if (!visited.Add(candidate.Destination))
                         continue;
 
-                    result.Add(edge);
-                    AddCandidateEdges(edge.SecondSensorId, visited, candidates);
+                    result.Add(candidate.Edge);
+
+                    AddCandidateEdges(
+                        candidate.Destination,
+                        visited,
+                        candidates);
                 }
             }
 
@@ -326,10 +379,14 @@ public class SensorRegistryService
     }
 
     /// <summary>
-    /// Calculates a minimum spanning forest using Kruskal's algorithm.
-    /// Complexity: O(E log E).
+    /// Calculates a minimum spanning forest using Kruskal's algorithm
+    /// and a disjoint-set union structure with path compression and rank.
+    ///
+    /// Complexity: O(E log E) for edge sorting, plus near-constant
+    /// amortized disjoint-set operations.
     /// </summary>
-    public IReadOnlyList<WeightedSensorConnection> GetMinimumSpanningTreeKruskal()
+    public IReadOnlyList<WeightedSensorConnection>
+        GetMinimumSpanningTreeKruskal()
     {
         lock (_syncLock)
         {
@@ -339,8 +396,11 @@ public class SensorRegistryService
                 .ThenBy(edge => edge.SecondSensorId)
                 .ToList();
 
-            var parent = _sensors.Keys.ToDictionary(id => id, id => id);
-            var rank = _sensors.Keys.ToDictionary(id => id, _ => 0);
+            var parent = _sensors.Keys
+                .ToDictionary(id => id, id => id);
+
+            var rank = _sensors.Keys
+                .ToDictionary(id => id, _ => 0);
 
             var result = new List<WeightedSensorConnection>();
 
@@ -363,20 +423,35 @@ public class SensorRegistryService
     private void AddCandidateEdges(
         Guid sensorId,
         HashSet<Guid> visited,
-        PriorityQueue<WeightedSensorConnection, (double Weight, Guid From, Guid To)> queue)
+        PriorityQueue<
+            PrimCandidate,
+            (double Weight, Guid First, Guid Second)> queue)
     {
-        foreach (var neighbor in _connections[sensorId].OrderBy(entry => entry.Key))
+        foreach (var neighbor in
+                 _connections[sensorId].OrderBy(entry => entry.Key))
         {
             if (visited.Contains(neighbor.Key))
                 continue;
 
+            var first = sensorId.CompareTo(neighbor.Key) < 0
+                ? sensorId
+                : neighbor.Key;
+
+            var second = sensorId.CompareTo(neighbor.Key) < 0
+                ? neighbor.Key
+                : sensorId;
+
             var edge = new WeightedSensorConnection(
-                sensorId,
-                neighbor.Key,
+                first,
+                second,
                 neighbor.Value);
 
-            queue.Enqueue(
+            var candidate = new PrimCandidate(
                 edge,
+                neighbor.Key);
+
+            queue.Enqueue(
+                candidate,
                 (edge.Weight, edge.FirstSensorId, edge.SecondSensorId));
         }
     }
@@ -389,13 +464,13 @@ public class SensorRegistryService
         {
             foreach (var neighbor in entry.Value)
             {
-                if (entry.Key.CompareTo(neighbor.Key) < 0)
-                {
-                    edges.Add(new WeightedSensorConnection(
-                        entry.Key,
-                        neighbor.Key,
-                        neighbor.Value));
-                }
+                if (entry.Key.CompareTo(neighbor.Key) >= 0)
+                    continue;
+
+                edges.Add(new WeightedSensorConnection(
+                    entry.Key,
+                    neighbor.Key,
+                    neighbor.Value));
             }
         }
 
@@ -405,10 +480,16 @@ public class SensorRegistryService
             .ToList();
     }
 
-    private static Guid Find(Dictionary<Guid, Guid> parent, Guid sensorId)
+    private static Guid Find(
+        Dictionary<Guid, Guid> parent,
+        Guid sensorId)
     {
         if (parent[sensorId] != sensorId)
-            parent[sensorId] = Find(parent, parent[sensorId]);
+        {
+            parent[sensorId] = Find(
+                parent,
+                parent[sensorId]);
+        }
 
         return parent[sensorId];
     }
@@ -433,6 +514,10 @@ public class SensorRegistryService
             rank[firstRoot]++;
         }
     }
+
+    private sealed record PrimCandidate(
+        WeightedSensorConnection Edge,
+        Guid Destination);
 }
 
 public sealed record WeightedSensorConnection(

@@ -1,14 +1,18 @@
 ﻿
+using System.Collections.Concurrent;
+
 namespace SmartX.Api.Services;
 
 public sealed class TelemetryHistoryService
 {
     private const int DefaultMaxReadingsPerSensor = 10_000;
 
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, SensorHistory> _history = new();
+    private readonly ConcurrentDictionary<Guid, SensorHistory> _history = new();
     private readonly int _maxReadingsPerSensor;
 
-    public TelemetryHistoryService() : this(DefaultMaxReadingsPerSensor) { }
+    public TelemetryHistoryService() : this(DefaultMaxReadingsPerSensor)
+    {
+    }
 
     public TelemetryHistoryService(int maxReadingsPerSensor)
     {
@@ -27,14 +31,29 @@ public sealed class TelemetryHistoryService
     public void AddReading(Guid sensorId, double value, string metricName, string unit) =>
         AddReading(sensorId, value, metricName, unit, 0, 0, DateTimeOffset.UtcNow);
 
-    public void AddReading(Guid sensorId, double value, string metricName, string unit,
+    public void AddReading(
+        Guid sensorId,
+        double value,
+        string metricName,
+        string unit,
         DateTimeOffset observedAt) =>
         AddReading(sensorId, value, metricName, unit, 0, 0, observedAt);
 
-    public void AddReading(Guid sensorId, double value, string metricName, string unit,
-        double warningThreshold, double criticalThreshold) =>
-        AddReading(sensorId, value, metricName, unit, warningThreshold,
-            criticalThreshold, DateTimeOffset.UtcNow);
+    public void AddReading(
+        Guid sensorId,
+        double value,
+        string metricName,
+        string unit,
+        double warningThreshold,
+        double criticalThreshold) =>
+        AddReading(
+            sensorId,
+            value,
+            metricName,
+            unit,
+            warningThreshold,
+            criticalThreshold,
+            DateTimeOffset.UtcNow);
 
     public void AddReading(
         Guid sensorId,
@@ -46,13 +65,18 @@ public sealed class TelemetryHistoryService
         DateTimeOffset observedAt)
     {
         if (sensorId == Guid.Empty)
-            throw new ArgumentException("Sensor ID cannot be empty.", nameof(sensorId));
+            throw new ArgumentException(
+                "Sensor ID cannot be empty.",
+                nameof(sensorId));
 
         if (!double.IsFinite(value))
             throw new ArgumentOutOfRangeException(nameof(value));
 
-        if (!double.IsFinite(warningThreshold) || !double.IsFinite(criticalThreshold))
+        if (!double.IsFinite(warningThreshold) ||
+            !double.IsFinite(criticalThreshold))
+        {
             throw new ArgumentOutOfRangeException(nameof(warningThreshold));
+        }
 
         ArgumentNullException.ThrowIfNull(metricName);
         ArgumentNullException.ThrowIfNull(unit);
@@ -77,10 +101,13 @@ public sealed class TelemetryHistoryService
             .Select(reading => reading.Value)
             .ToArray();
 
-    public IReadOnlyList<TelemetryHistoryReading> GetTimestampedReadings(Guid sensorId) =>
+    public IReadOnlyList<TelemetryHistoryReading> GetTimestampedReadings(
+        Guid sensorId) =>
         GetHistory(sensorId);
 
-    public IReadOnlyList<TelemetryHistoryReading> GetTimestampedReadings(Guid sensorId, int count)
+    public IReadOnlyList<TelemetryHistoryReading> GetTimestampedReadings(
+        Guid sensorId,
+        int count)
     {
         if (count <= 0)
             throw new ArgumentOutOfRangeException(nameof(count));
@@ -93,7 +120,7 @@ public sealed class TelemetryHistoryService
 
     /// <summary>
     /// Retrieves readings in an inclusive timestamp range.
-    /// AVL complexity: O(log n + k), where k is the result count.
+    /// Expected complexity: O(log n + k), where k is the number of results.
     /// </summary>
     public IReadOnlyList<TelemetryHistoryReading> GetReadingsBetween(
         Guid sensorId,
@@ -102,7 +129,8 @@ public sealed class TelemetryHistoryService
         int? limit = null)
     {
         if (from > to)
-            throw new ArgumentException("The start time cannot be later than the end time.");
+            throw new ArgumentException(
+                "The start time cannot be later than the end time.");
 
         if (limit is < 1)
             throw new ArgumentOutOfRangeException(nameof(limit));
@@ -135,9 +163,25 @@ public sealed class TelemetryHistoryService
     }
 
     public IReadOnlyDictionary<Guid, int> GetHistorySummary() =>
-        _history.ToDictionary(entry => entry.Key, entry => entry.Value.Count);
+        _history.ToDictionary(
+            entry => entry.Key,
+            entry => entry.Value.Count);
 
-    public TelemetryTrendSummary? GetTrendSummary(Guid sensorId, int count = 20)
+    /// <summary>
+    /// Returns structural diagnostics for the sensor's AVL tree.
+    /// An unknown sensor returns an empty, balanced tree.
+    /// </summary>
+    public AvlTreeDiagnostics GetTreeDiagnostics(Guid sensorId)
+    {
+        if (!_history.TryGetValue(sensorId, out var history))
+            return AvlTreeDiagnostics.Empty;
+
+        return history.GetDiagnostics();
+    }
+
+    public TelemetryTrendSummary? GetTrendSummary(
+        Guid sensorId,
+        int count = 20)
     {
         if (count < 2)
             throw new ArgumentOutOfRangeException(nameof(count));
@@ -149,12 +193,14 @@ public sealed class TelemetryHistoryService
 
         var first = readings[0];
         var last = readings[^1];
-        var elapsedMinutes = (last.ObservedAt - first.ObservedAt).TotalMinutes;
+
+        var elapsedMinutes =
+            (last.ObservedAt - first.ObservedAt).TotalMinutes;
 
         if (elapsedMinutes <= 0)
             return null;
 
-        var values = readings.Select(x => x.Value).ToArray();
+        var values = readings.Select(reading => reading.Value).ToArray();
         var change = last.Value - first.Value;
         var slope = change / elapsedMinutes;
 
@@ -162,7 +208,10 @@ public sealed class TelemetryHistoryService
             return null;
 
         var mean = values.Average();
-        var variance = values.Average(value => (value - mean) * (value - mean));
+
+        var variance = values.Average(
+            value => (value - mean) * (value - mean));
+
         var standardDeviation = Math.Sqrt(variance);
 
         return new TelemetryTrendSummary(
@@ -188,23 +237,29 @@ public sealed class TelemetryHistoryService
 
         var readings = GetReadings(sensorId);
         var matrix = new double[rows, columns];
+
         var capacity = (long)rows * columns;
         var startIndex = Math.Max(0L, readings.Count - capacity);
 
         for (long index = startIndex;
-             index < readings.Count && index - startIndex < capacity;
+             index < readings.Count &&
+             index - startIndex < capacity;
              index++)
         {
             var matrixIndex = index - startIndex;
-            matrix[(int)(matrixIndex / columns), (int)(matrixIndex % columns)] =
-                readings[(int)index];
+
+            matrix[
+                (int)(matrixIndex / columns),
+                (int)(matrixIndex % columns)] = readings[(int)index];
         }
 
         return matrix;
     }
 
     public int GetReadingCount(Guid sensorId) =>
-        _history.TryGetValue(sensorId, out var history) ? history.Count : 0;
+        _history.TryGetValue(sensorId, out var history)
+            ? history.Count
+            : 0;
 
     public DateTimeOffset? GetLatestObservedAt(Guid sensorId) =>
         _history.TryGetValue(sensorId, out var history)
@@ -225,7 +280,9 @@ public sealed class TelemetryHistoryService
         double standardDeviation)
     {
         var scale = Math.Max(Math.Abs(mean), 1.0);
-        var tolerance = Math.Max(scale * 0.001, standardDeviation * 0.05);
+        var tolerance = Math.Max(
+            scale * 0.001,
+            standardDeviation * 0.05);
 
         if (change > tolerance)
             return "Increasing";
@@ -240,9 +297,15 @@ public sealed class TelemetryHistoryService
     {
         private readonly object _sync = new();
         private readonly int _capacity;
+
         private Node? _root;
         private int _count;
         private long _sequence;
+
+        private long _llRotations;
+        private long _rrRotations;
+        private long _lrRotations;
+        private long _rlRotations;
 
         public SensorHistory(int capacity)
         {
@@ -262,7 +325,10 @@ public sealed class TelemetryHistoryService
         {
             lock (_sync)
             {
-                var key = new TreeKey(reading.ObservedAt, ++_sequence);
+                var key = new TreeKey(
+                    reading.ObservedAt,
+                    ++_sequence);
+
                 _root = Insert(_root, key, reading);
                 _count++;
 
@@ -280,7 +346,7 @@ public sealed class TelemetryHistoryService
             {
                 var result = new List<TelemetryHistoryReading>(_count);
                 TraverseInOrder(_root, result);
-                return result;
+                return result.ToArray();
             }
         }
 
@@ -291,9 +357,14 @@ public sealed class TelemetryHistoryService
         {
             lock (_sync)
             {
-                var result = new List<TelemetryHistoryReading>();
+                var result = new List<TelemetryHistoryReading>(
+                    limit.HasValue
+                        ? Math.Min(limit.Value, _count)
+                        : Math.Min(_count, 256));
+
                 CollectRange(_root, from, to, limit, result);
-                return result;
+
+                return result.ToArray();
             }
         }
 
@@ -313,6 +384,23 @@ public sealed class TelemetryHistoryService
             }
         }
 
+        public AvlTreeDiagnostics GetDiagnostics()
+        {
+            lock (_sync)
+            {
+                var structure = InspectTree(_root);
+
+                return new AvlTreeDiagnostics(
+                    structure.Height,
+                    structure.NodeCount,
+                    structure.IsBalanced,
+                    _llRotations,
+                    _rrRotations,
+                    _lrRotations,
+                    _rlRotations);
+            }
+        }
+
         private static void CollectRange(
             Node? node,
             DateTimeOffset from,
@@ -320,23 +408,29 @@ public sealed class TelemetryHistoryService
             int? limit,
             List<TelemetryHistoryReading> result)
         {
-            if (node is null || (limit.HasValue && result.Count >= limit.Value))
+            if (node is null ||
+                (limit.HasValue && result.Count >= limit.Value))
+            {
                 return;
+            }
 
             var timestamp = node.Reading.ObservedAt;
 
-            // Include all readings sharing either boundary timestamp.
             if (timestamp >= from)
                 CollectRange(node.Left, from, to, limit, result);
 
-            if (timestamp >= from && timestamp <= to &&
+            if (timestamp >= from &&
+                timestamp <= to &&
                 (!limit.HasValue || result.Count < limit.Value))
             {
                 result.Add(node.Reading);
             }
 
-            if (timestamp <= to && (!limit.HasValue || result.Count < limit.Value))
+            if (timestamp <= to &&
+                (!limit.HasValue || result.Count < limit.Value))
+            {
                 CollectRange(node.Right, from, to, limit, result);
+            }
         }
 
         private static void TraverseInOrder(
@@ -351,7 +445,7 @@ public sealed class TelemetryHistoryService
             TraverseInOrder(node.Right, result);
         }
 
-        private static Node Insert(
+        private Node Insert(
             Node? node,
             TreeKey key,
             TelemetryHistoryReading reading)
@@ -367,7 +461,7 @@ public sealed class TelemetryHistoryService
             return Balance(node);
         }
 
-        private static Node? RemoveMinimum(Node? node)
+        private Node? RemoveMinimum(Node? node)
         {
             if (node is null)
                 return null;
@@ -376,27 +470,49 @@ public sealed class TelemetryHistoryService
                 return node.Right;
 
             node.Left = RemoveMinimum(node.Left);
+
             return Balance(node);
         }
 
-        private static Node Balance(Node node)
+        private Node Balance(Node node)
         {
             UpdateHeight(node);
 
-            var balanceFactor = Height(node.Left) - Height(node.Right);
+            var balanceFactor =
+                Height(node.Left) - Height(node.Right);
 
             if (balanceFactor > 1)
             {
-                if (Height(node.Left!.Left) < Height(node.Left.Right))
-                    node.Left = RotateLeft(node.Left);
+                var leftBalanceFactor =
+                    Height(node.Left!.Left) -
+                    Height(node.Left.Right);
+
+                if (leftBalanceFactor >= 0)
+                {
+                    _llRotations++;
+                    return RotateRight(node);
+                }
+
+                _lrRotations++;
+                node.Left = RotateLeft(node.Left);
 
                 return RotateRight(node);
             }
 
             if (balanceFactor < -1)
             {
-                if (Height(node.Right!.Right) < Height(node.Right.Left))
-                    node.Right = RotateRight(node.Right);
+                var rightBalanceFactor =
+                    Height(node.Right!.Left) -
+                    Height(node.Right.Right);
+
+                if (rightBalanceFactor <= 0)
+                {
+                    _rrRotations++;
+                    return RotateLeft(node);
+                }
+
+                _rlRotations++;
+                node.Right = RotateRight(node.Right);
 
                 return RotateLeft(node);
             }
@@ -407,6 +523,7 @@ public sealed class TelemetryHistoryService
         private static Node RotateRight(Node root)
         {
             var pivot = root.Left!;
+
             root.Left = pivot.Right;
             pivot.Right = root;
 
@@ -419,6 +536,7 @@ public sealed class TelemetryHistoryService
         private static Node RotateLeft(Node root)
         {
             var pivot = root.Right!;
+
             root.Right = pivot.Left;
             pivot.Left = root;
 
@@ -428,10 +546,48 @@ public sealed class TelemetryHistoryService
             return pivot;
         }
 
-        private static int Height(Node? node) => node?.Height ?? 0;
+        private static int Height(Node? node) =>
+            node?.Height ?? 0;
 
-        private static void UpdateHeight(Node node) =>
-            node.Height = 1 + Math.Max(Height(node.Left), Height(node.Right));
+        private static void UpdateHeight(Node node)
+        {
+            node.Height = 1 + Math.Max(
+                Height(node.Left),
+                Height(node.Right));
+        }
+
+        private static TreeInspection InspectTree(Node? node)
+        {
+            if (node is null)
+                return new TreeInspection(0, 0, true);
+
+            var left = InspectTree(node.Left);
+            var right = InspectTree(node.Right);
+
+            var height = 1 + Math.Max(
+                left.Height,
+                right.Height);
+
+            var nodeCount = 1 +
+                left.NodeCount +
+                right.NodeCount;
+
+            var balanced =
+                left.IsBalanced &&
+                right.IsBalanced &&
+                Math.Abs(left.Height - right.Height) <= 1 &&
+                node.Height == height;
+
+            return new TreeInspection(
+                height,
+                nodeCount,
+                balanced);
+        }
+
+        private readonly record struct TreeInspection(
+            int Height,
+            int NodeCount,
+            bool IsBalanced);
 
         private readonly record struct TreeKey(
             DateTimeOffset Timestamp,
@@ -439,7 +595,8 @@ public sealed class TelemetryHistoryService
         {
             public int CompareTo(TreeKey other)
             {
-                var comparison = Timestamp.CompareTo(other.Timestamp);
+                var comparison =
+                    Timestamp.CompareTo(other.Timestamp);
 
                 return comparison != 0
                     ? comparison
@@ -450,18 +607,43 @@ public sealed class TelemetryHistoryService
         private sealed class Node
         {
             public TreeKey Key { get; }
+
             public TelemetryHistoryReading Reading { get; }
+
             public Node? Left { get; set; }
+
             public Node? Right { get; set; }
+
             public int Height { get; set; } = 1;
 
-            public Node(TreeKey key, TelemetryHistoryReading reading)
+            public Node(
+                TreeKey key,
+                TelemetryHistoryReading reading)
             {
                 Key = key;
                 Reading = reading;
             }
         }
     }
+}
+
+public sealed record AvlTreeDiagnostics(
+    int Height,
+    int NodeCount,
+    bool IsBalanced,
+    long LeftLeftRotations,
+    long RightRightRotations,
+    long LeftRightRotations,
+    long RightLeftRotations)
+{
+    public long TotalRotations =>
+        LeftLeftRotations +
+        RightRightRotations +
+        LeftRightRotations +
+        RightLeftRotations;
+
+    public static AvlTreeDiagnostics Empty { get; } =
+        new(0, 0, true, 0, 0, 0, 0);
 }
 
 public sealed record TelemetryHistoryReading(

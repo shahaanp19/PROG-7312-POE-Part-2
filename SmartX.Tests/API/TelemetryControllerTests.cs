@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿
+using Microsoft.AspNetCore.Mvc;
 using SmartX.Api.Controllers;
 using SmartX.Api.Services;
 using SmartX.Shared.DTOs;
@@ -13,537 +14,311 @@ public class TelemetryControllerTests
 
     public TelemetryControllerTests()
     {
-        var thresholdValidator =
-            new TelemetryThresholdValidator();
+        var thresholdValidator = new TelemetryThresholdValidator();
+        var telemetryValidator = new TelemetryValidator(thresholdValidator);
+        var historyService = new TelemetryHistoryService();
 
-        var telemetryValidator =
-            new TelemetryValidator(
-                thresholdValidator);
+        var ingestionService = new TelemetryIngestionService(
+            telemetryValidator,
+            historyService);
 
-        var ingestionService =
-            new TelemetryIngestionService(
-                telemetryValidator);
+        var deploymentValidator = new RecursiveDeploymentValidator();
+        _sensorRegistry = new SensorRegistryService();
+        var batchProcessor = new TelemetryBatchProcessor();
 
-        var deploymentValidator =
-            new RecursiveDeploymentValidator();
-
-        _sensorRegistry =
-            new SensorRegistryService();
-
-        var batchProcessor =
-            new TelemetryBatchProcessor();
-
-        _controller =
-            new TelemetryController(
-                ingestionService,
-                deploymentValidator,
-                _sensorRegistry,
-                batchProcessor);
+        _controller = new TelemetryController(
+            ingestionService,
+            deploymentValidator,
+            _sensorRegistry,
+            batchProcessor);
     }
 
     [Fact]
     public void Health_ShouldReturnHealthyStatus()
     {
-        var result =
-            _controller.Health();
+        var result = _controller.Health();
 
-        var okResult =
-            Assert.IsType<OkObjectResult>(result);
-
-        Assert.NotNull(
-            okResult.Value);
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
     }
 
     [Fact]
     public void Ingest_ShouldProcessValidTelemetry()
     {
-        var request =
-            CreateValidRequest();
+        var request = CreateValidRequest();
+        RegisterSensor(request.SensorDeviceId);
 
-        RegisterSensor(
-            request.SensorDeviceId);
+        var result = _controller.Ingest(request);
 
-        var result =
-            _controller.Ingest(request);
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var ingestionResult = Assert.IsType<TelemetryIngestionResult>(okResult.Value);
 
-        var okResult =
-            Assert.IsType<OkObjectResult>(
-                result.Result);
-
-        var ingestionResult =
-            Assert.IsType<TelemetryIngestionResult>(
-                okResult.Value);
-
-        Assert.True(
-            ingestionResult.Success);
-
-        Assert.Equal(
-            request.SensorDeviceId,
-            ingestionResult.SensorDeviceId);
+        Assert.True(ingestionResult.Success);
+        Assert.Equal(request.SensorDeviceId, ingestionResult.SensorDeviceId);
     }
 
     [Fact]
     public void Ingest_ShouldRejectEmptySensorIdentifier()
     {
-        var request =
-            CreateValidRequest();
+        var request = CreateValidRequest();
+        request.SensorDeviceId = Guid.Empty;
 
-        request.SensorDeviceId =
-            Guid.Empty;
+        var result = _controller.Ingest(request);
 
-        var result =
-            _controller.Ingest(request);
-
-        var badRequest =
-            Assert.IsType<BadRequestObjectResult>(
-                result.Result);
-
-        Assert.NotNull(
-            badRequest.Value);
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.NotNull(badRequest.Value);
     }
 
     [Fact]
     public void Ingest_ShouldReturnNotFoundForUnregisteredSensor()
     {
-        var request =
-            CreateValidRequest();
+        var request = CreateValidRequest();
 
-        var result =
-            _controller.Ingest(request);
+        var result = _controller.Ingest(request);
 
-        var notFound =
-            Assert.IsType<NotFoundObjectResult>(
-                result.Result);
-
-        Assert.NotNull(
-            notFound.Value);
+        var notFound = Assert.IsType<NotFoundObjectResult>(result.Result);
+        Assert.NotNull(notFound.Value);
     }
 
     [Fact]
     public void Ingest_ShouldRejectMissingMetricName()
     {
-        var request =
-            CreateValidRequest();
+        var request = CreateValidRequest();
+        RegisterSensor(request.SensorDeviceId);
+        request.MetricName = string.Empty;
 
-        RegisterSensor(
-            request.SensorDeviceId);
+        var result = _controller.Ingest(request);
 
-        request.MetricName =
-            string.Empty;
-
-        var result =
-            _controller.Ingest(request);
-
-        var badRequest =
-            Assert.IsType<BadRequestObjectResult>(
-                result.Result);
-
-        Assert.NotNull(
-            badRequest.Value);
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.NotNull(badRequest.Value);
     }
 
     [Fact]
     public void Ingest_ShouldRejectMissingUnit()
     {
-        var request =
-            CreateValidRequest();
+        var request = CreateValidRequest();
+        RegisterSensor(request.SensorDeviceId);
+        request.Unit = string.Empty;
 
-        RegisterSensor(
-            request.SensorDeviceId);
+        var result = _controller.Ingest(request);
 
-        request.Unit =
-            string.Empty;
-
-        var result =
-            _controller.Ingest(request);
-
-        var badRequest =
-            Assert.IsType<BadRequestObjectResult>(
-                result.Result);
-
-        Assert.NotNull(
-            badRequest.Value);
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.NotNull(badRequest.Value);
     }
 
     [Fact]
     public void Ingest_ShouldRejectNaNTelemetry()
     {
-        var request =
-            CreateValidRequest();
+        var request = CreateValidRequest();
+        RegisterSensor(request.SensorDeviceId);
+        request.Value = double.NaN;
 
-        RegisterSensor(
-            request.SensorDeviceId);
+        var result = _controller.Ingest(request);
 
-        request.Value =
-            double.NaN;
-
-        var result =
-            _controller.Ingest(request);
-
-        var badRequest =
-            Assert.IsType<BadRequestObjectResult>(
-                result.Result);
-
-        Assert.NotNull(
-            badRequest.Value);
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.NotNull(badRequest.Value);
     }
 
     [Fact]
     public void Ingest_ShouldRejectPositiveInfinity()
     {
-        var request =
-            CreateValidRequest();
+        var request = CreateValidRequest();
+        RegisterSensor(request.SensorDeviceId);
+        request.Value = double.PositiveInfinity;
 
-        RegisterSensor(
-            request.SensorDeviceId);
+        var result = _controller.Ingest(request);
 
-        request.Value =
-            double.PositiveInfinity;
-
-        var result =
-            _controller.Ingest(request);
-
-        var badRequest =
-            Assert.IsType<BadRequestObjectResult>(
-                result.Result);
-
-        Assert.NotNull(
-            badRequest.Value);
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.NotNull(badRequest.Value);
     }
 
     [Fact]
     public void Ingest_ShouldRejectNegativeInfinity()
     {
-        var request =
-            CreateValidRequest();
+        var request = CreateValidRequest();
+        RegisterSensor(request.SensorDeviceId);
+        request.Value = double.NegativeInfinity;
 
-        RegisterSensor(
-            request.SensorDeviceId);
+        var result = _controller.Ingest(request);
 
-        request.Value =
-            double.NegativeInfinity;
-
-        var result =
-            _controller.Ingest(request);
-
-        var badRequest =
-            Assert.IsType<BadRequestObjectResult>(
-                result.Result);
-
-        Assert.NotNull(
-            badRequest.Value);
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.NotNull(badRequest.Value);
     }
 
     [Fact]
     public void Ingest_ShouldRejectInvalidExpectedValueRange()
     {
-        var request =
-            CreateValidRequest();
+        var request = CreateValidRequest();
+        RegisterSensor(request.SensorDeviceId);
+        request.MinimumExpectedValue = 100;
+        request.MaximumExpectedValue = 50;
 
-        RegisterSensor(
-            request.SensorDeviceId);
+        var result = _controller.Ingest(request);
 
-        request.MinimumExpectedValue =
-            100;
-
-        request.MaximumExpectedValue =
-            50;
-
-        var result =
-            _controller.Ingest(request);
-
-        var badRequest =
-            Assert.IsType<BadRequestObjectResult>(
-                result.Result);
-
-        Assert.NotNull(
-            badRequest.Value);
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.NotNull(badRequest.Value);
     }
 
     [Fact]
     public void Ingest_ShouldRejectInvalidWarningCriticalThresholds()
     {
-        var request =
-            CreateValidRequest();
+        var request = CreateValidRequest();
+        RegisterSensor(request.SensorDeviceId);
+        request.WarningThreshold = 90;
+        request.CriticalThreshold = 70;
 
-        RegisterSensor(
-            request.SensorDeviceId);
+        var result = _controller.Ingest(request);
 
-        request.WarningThreshold =
-            90;
-
-        request.CriticalThreshold =
-            70;
-
-        var result =
-            _controller.Ingest(request);
-
-        var badRequest =
-            Assert.IsType<BadRequestObjectResult>(
-                result.Result);
-
-        Assert.NotNull(
-            badRequest.Value);
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.NotNull(badRequest.Value);
     }
 
     [Fact]
     public void Ingest_ShouldReturnUnprocessableEntityWhenMetricIsDisabled()
     {
-        var request =
-            CreateValidRequest();
+        var request = CreateValidRequest();
+        RegisterSensor(request.SensorDeviceId);
+        request.IsEnabled = false;
 
-        RegisterSensor(
-            request.SensorDeviceId);
+        var result = _controller.Ingest(request);
 
-        request.IsEnabled =
-            false;
+        var response = Assert.IsType<UnprocessableEntityObjectResult>(result.Result);
+        var ingestionResult = Assert.IsType<TelemetryIngestionResult>(response.Value);
 
-        var result =
-            _controller.Ingest(request);
-
-        var response =
-            Assert.IsType<UnprocessableEntityObjectResult>(
-                result.Result);
-
-        var ingestionResult =
-            Assert.IsType<TelemetryIngestionResult>(
-                response.Value);
-
-        Assert.False(
-            ingestionResult.Success);
+        Assert.False(ingestionResult.Success);
     }
 
     [Fact]
     public void Ingest_ShouldDetectTelemetryAnomaly()
     {
-        var request =
-            CreateValidRequest();
+        var request = CreateValidRequest();
+        RegisterSensor(request.SensorDeviceId);
 
-        RegisterSensor(
-            request.SensorDeviceId);
+        request.Value = 60;
+        request.MinimumExpectedValue = 0;
+        request.MaximumExpectedValue = 50;
+        request.WarningThreshold = 70;
+        request.CriticalThreshold = 90;
 
-        request.Value =
-            60;
+        var result = _controller.Ingest(request);
 
-        request.MinimumExpectedValue =
-            0;
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var ingestionResult = Assert.IsType<TelemetryIngestionResult>(okResult.Value);
 
-        request.MaximumExpectedValue =
-            50;
-
-        request.WarningThreshold =
-            70;
-
-        request.CriticalThreshold =
-            90;
-
-        var result =
-            _controller.Ingest(request);
-
-        var okResult =
-            Assert.IsType<OkObjectResult>(
-                result.Result);
-
-        var ingestionResult =
-            Assert.IsType<TelemetryIngestionResult>(
-                okResult.Value);
-
-        Assert.True(
-            ingestionResult.Success);
-
-        Assert.True(
-            ingestionResult.IsAnomaly);
+        Assert.True(ingestionResult.Success);
+        Assert.True(ingestionResult.IsAnomaly);
     }
 
     [Fact]
     public void Ingest_ShouldDetectWarningThreshold()
     {
-        var request =
-            CreateValidRequest();
+        var request = CreateValidRequest();
+        RegisterSensor(request.SensorDeviceId);
 
-        RegisterSensor(
-            request.SensorDeviceId);
+        request.Value = 45;
+        request.WarningThreshold = 40;
+        request.CriticalThreshold = 50;
 
-        request.Value =
-            45;
+        var result = _controller.Ingest(request);
 
-        request.WarningThreshold =
-            40;
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var ingestionResult = Assert.IsType<TelemetryIngestionResult>(okResult.Value);
 
-        request.CriticalThreshold =
-            50;
-
-        var result =
-            _controller.Ingest(request);
-
-        var okResult =
-            Assert.IsType<OkObjectResult>(
-                result.Result);
-
-        var ingestionResult =
-            Assert.IsType<TelemetryIngestionResult>(
-                okResult.Value);
-
-        Assert.True(
-            ingestionResult.Success);
-
-        Assert.True(
-            ingestionResult.IsAnomaly);
+        Assert.True(ingestionResult.Success);
+        Assert.True(ingestionResult.IsAnomaly);
     }
 
     [Fact]
     public void Ingest_ShouldDetectCriticalThreshold()
     {
-        var request =
-            CreateValidRequest();
+        var request = CreateValidRequest();
+        RegisterSensor(request.SensorDeviceId);
 
-        RegisterSensor(
-            request.SensorDeviceId);
+        request.Value = 95;
+        request.WarningThreshold = 70;
+        request.CriticalThreshold = 90;
 
-        request.Value =
-            95;
+        var result = _controller.Ingest(request);
 
-        request.WarningThreshold =
-            70;
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var ingestionResult = Assert.IsType<TelemetryIngestionResult>(okResult.Value);
 
-        request.CriticalThreshold =
-            90;
-
-        var result =
-            _controller.Ingest(request);
-
-        var okResult =
-            Assert.IsType<OkObjectResult>(
-                result.Result);
-
-        var ingestionResult =
-            Assert.IsType<TelemetryIngestionResult>(
-                okResult.Value);
-
-        Assert.True(
-            ingestionResult.Success);
-
-        Assert.True(
-            ingestionResult.IsAnomaly);
+        Assert.True(ingestionResult.Success);
+        Assert.True(ingestionResult.IsAnomaly);
     }
 
     [Fact]
     public void GenericDemo_ShouldReturnSuccessfulResponse()
     {
-        var result =
-            _controller.GenericDemo();
+        var result = _controller.GenericDemo();
 
-        var okResult =
-            Assert.IsType<OkObjectResult>(
-                result);
-
-        Assert.NotNull(
-            okResult.Value);
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
     }
 
     [Fact]
     public void RecursiveValidationDemo_ShouldReturnSuccessfulResponse()
     {
-        var result =
-            _controller.RecursiveValidationDemo();
+        var result = _controller.RecursiveValidationDemo();
 
-        var okResult =
-            Assert.IsType<OkObjectResult>(
-                result);
-
-        Assert.NotNull(
-            okResult.Value);
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
     }
 
     [Fact]
     public void RecursiveValidationFailureDemo_ShouldReturnSuccessfulResponse()
     {
-        var result =
-            _controller.RecursiveValidationFailureDemo();
+        var result = _controller.RecursiveValidationFailureDemo();
 
-        var okResult =
-            Assert.IsType<OkObjectResult>(
-                result);
-
-        Assert.NotNull(
-            okResult.Value);
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
     }
 
     [Fact]
     public void RecursiveValidationMissingDemo_ShouldReturnSuccessfulResponse()
     {
-        var result =
-            _controller.RecursiveValidationMissingDemo();
+        var result = _controller.RecursiveValidationMissingDemo();
 
-        var okResult =
-            Assert.IsType<OkObjectResult>(
-                result);
-
-        Assert.NotNull(
-            okResult.Value);
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
     }
 
     [Fact]
     public void HistoricalBatchDemo_ShouldReturnSuccessfulResponse()
     {
-        var result =
-            _controller.HistoricalBatchDemo();
+        var result = _controller.HistoricalBatchDemo();
 
-        var okResult =
-            Assert.IsType<OkObjectResult>(
-                result);
-
-        Assert.NotNull(
-            okResult.Value);
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
     }
 
-    private void RegisterSensor(
-        Guid sensorId)
+    private void RegisterSensor(Guid sensorId)
     {
-        var registered =
-            _sensorRegistry.Register(
-                sensorId,
-                new
-                {
-                    SensorId = sensorId,
-                    Name = "Test Sensor",
-                    SensorType = "Environmental"
-                });
+        var registered = _sensorRegistry.Register(
+            sensorId,
+            new
+            {
+                SensorId = sensorId,
+                Name = "Test Sensor",
+                SensorType = "Environmental"
+            });
 
-        Assert.True(
-            registered);
+        Assert.True(registered);
     }
 
     private static TelemetryIngestionRequest CreateValidRequest()
     {
         return new TelemetryIngestionRequest
         {
-            SensorDeviceId =
-                Guid.NewGuid(),
-
-            MetricName =
-                "Temperature",
-
-            Unit =
-                "°C",
-
-            Value =
-                25,
-
-            MinimumExpectedValue =
-                0,
-
-            MaximumExpectedValue =
-                50,
-
-            WarningThreshold =
-                40,
-
-            CriticalThreshold =
-                45,
-
-            IsEnabled =
-                true
+            SensorDeviceId = Guid.NewGuid(),
+            MetricName = "Temperature",
+            Unit = "°C",
+            Value = 25,
+            MinimumExpectedValue = 0,
+            MaximumExpectedValue = 50,
+            WarningThreshold = 40,
+            CriticalThreshold = 45,
+            IsEnabled = true
         };
     }
 }
