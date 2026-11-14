@@ -78,7 +78,7 @@ public class SensorRegistryService
     }
 
     /// <summary>
-    /// Adds a bidirectional connection with a default weight of 1.
+    /// Adds a bidirectional connection with a default routing cost of 1.
     /// </summary>
     public bool AddConnection(Guid firstSensorId, Guid secondSensorId) =>
         AddConnection(firstSensorId, secondSensorId, 1.0);
@@ -149,6 +149,9 @@ public class SensorRegistryService
     /// <summary>
     /// Performs breadth-first traversal from the specified sensor.
     /// Returns only vertices reachable from the starting vertex.
+    ///
+    /// Time complexity: O(V + E).
+    /// Space complexity: O(V).
     /// </summary>
     public IReadOnlyList<Guid> BreadthFirstSearch(Guid startSensorId)
     {
@@ -168,7 +171,7 @@ public class SensorRegistryService
                 var current = queue.Dequeue();
                 result.Add(current);
 
-                foreach (var neighbor in _connections[current].Keys.OrderBy(id => id))
+                foreach (var neighbor in _connections[current].Keys)
                 {
                     if (visited.Add(neighbor))
                         queue.Enqueue(neighbor);
@@ -182,6 +185,9 @@ public class SensorRegistryService
     /// <summary>
     /// Performs iterative depth-first traversal.
     /// Returns only vertices reachable from the starting vertex.
+    ///
+    /// Time complexity: O(V + E).
+    /// Space complexity: O(V).
     /// </summary>
     public IReadOnlyList<Guid> DepthFirstSearch(Guid startSensorId)
     {
@@ -205,8 +211,7 @@ public class SensorRegistryService
 
                 result.Add(current);
 
-                foreach (var neighbor in
-                         _connections[current].Keys.OrderByDescending(id => id))
+                foreach (var neighbor in _connections[current].Keys)
                 {
                     if (!visited.Contains(neighbor))
                         stack.Push(neighbor);
@@ -220,6 +225,9 @@ public class SensorRegistryService
     /// <summary>
     /// Returns all registered sensors that cannot be reached from the gateway.
     /// If the gateway is not registered, every registered sensor is disconnected.
+    ///
+    /// Time complexity: O(V + E).
+    /// Space complexity: O(V).
     /// </summary>
     public IReadOnlyList<Guid> GetDisconnectedSensors(Guid gatewaySensorId)
     {
@@ -227,10 +235,7 @@ public class SensorRegistryService
         {
             if (!_connections.ContainsKey(gatewaySensorId))
             {
-                return _sensors.Keys
-                    .OrderBy(id => id)
-                    .ToList()
-                    .AsReadOnly();
+                return _sensors.Keys.ToList().AsReadOnly();
             }
 
             var reachable = new HashSet<Guid>();
@@ -252,7 +257,6 @@ public class SensorRegistryService
 
             return _sensors.Keys
                 .Where(id => !reachable.Contains(id))
-                .OrderBy(id => id)
                 .ToList()
                 .AsReadOnly();
         }
@@ -261,6 +265,9 @@ public class SensorRegistryService
     /// <summary>
     /// Calculates minimum hop distances from a gateway using BFS.
     /// Disconnected sensors are omitted from the returned dictionary.
+    ///
+    /// Time complexity: O(V + E).
+    /// Space complexity: O(V).
     /// </summary>
     public IReadOnlyDictionary<Guid, int> GetHopDistances(
         Guid gatewaySensorId)
@@ -325,7 +332,8 @@ public class SensorRegistryService
     /// Calculates a minimum spanning forest using Prim's algorithm.
     /// Disconnected graphs produce one minimum spanning tree per component.
     ///
-    /// Complexity: O(E log E) using a priority queue.
+    /// Time complexity: O(V + E log E).
+    /// Space complexity: O(V + E).
     /// </summary>
     public IReadOnlyList<WeightedSensorConnection>
         GetMinimumSpanningTreePrim(Guid? startSensorId = null)
@@ -382,8 +390,8 @@ public class SensorRegistryService
     /// Calculates a minimum spanning forest using Kruskal's algorithm
     /// and a disjoint-set union structure with path compression and rank.
     ///
-    /// Complexity: O(E log E) for edge sorting, plus near-constant
-    /// amortized disjoint-set operations.
+    /// Time complexity: O(E log E + V alpha(V)).
+    /// Space complexity: O(V + E).
     /// </summary>
     public IReadOnlyList<WeightedSensorConnection>
         GetMinimumSpanningTreeKruskal()
@@ -520,6 +528,9 @@ public class SensorRegistryService
         Guid Destination);
 }
 
+/// <summary>
+/// Represents an undirected weighted connection between two sensors.
+/// </summary>
 public sealed record WeightedSensorConnection(
     Guid FirstSensorId,
     Guid SecondSensorId,

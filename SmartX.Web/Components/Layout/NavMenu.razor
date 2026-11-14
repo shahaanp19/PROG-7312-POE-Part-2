@@ -1,6 +1,4 @@
-﻿@using Microsoft.AspNetCore.Components
-@using Microsoft.AspNetCore.Components.Routing
-@inject NavigationManager Navigation
+﻿@using Microsoft.AspNetCore.Components.Routing
 
 <nav class="pillar-nav" aria-label="Main navigation">
     <div class="nav-links">
@@ -31,6 +29,13 @@
                  class="nav-link">
             <span class="nav-icon" aria-hidden="true">⊞</span>
             <span class="nav-link-label">Collection Diagnostics</span>
+        </NavLink>
+
+        <NavLink href="/mesh-network"
+                 Match="NavLinkMatch.All"
+                 class="nav-link">
+            <span class="nav-icon" aria-hidden="true">⌘</span>
+            <span class="nav-link-label">Sensor Mesh</span>
         </NavLink>
     </div>
 
